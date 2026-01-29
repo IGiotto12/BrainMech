@@ -4,7 +4,7 @@
 
 This repository contains the official PyTorch implementation of **BrainMech**, a mechanistic foundation model for fMRI dynamics grounded in **Neural Koopman Observable State-Space Linearization (NKOSSL)**, **Topology-Aware Spatiotemporal Embedding Network (TASEN)**, and a **DPLR-Koopman** core with stochastic diffusion.
 
-## 🧠 Model Architecture & Methodology
+## Model Architecture & Methodology
 
 BrainMech models functional brain dynamics in a stochastic Koopman latent space, learning a population-level governing law with uncertainty-aware decoding.
 
@@ -28,10 +28,10 @@ BrainMech models functional brain dynamics in a stochastic Koopman latent space,
    - Gaussian observation model:
      $$x_\tau \mid z_\tau \sim \mathcal{N}(\mu_{\theta}(z_\tau), \sigma^2_{\theta}(z_\tau)I)$$
 
-## 📂 Repository Structure
+## Repository Structure
 
 ```text
-BrainMech_min/
+BrainMech/
 ├── README.md
 ├── requirements.txt
 ├── eval/
@@ -62,18 +62,19 @@ BrainMech_min/
     └── data_loader.py
 ```
 
-## 🚀 Usage Instructions
+## Usage Instructions
 
 ## 1. Pretraining (Self-Supervised)
 Train BrainMech with masked reconstruction and stochastic Koopman dynamics:
 
 ```bash
 python training/train_with_mae.py \
-  --npz_path data/hcpa_bold_with_fc.npz \
-  --batch_size 8 \
-  --epochs 50 \
-  --lr 0.0002 \
-  --koopman_rank 16 \
+  --data_dir \dataset_dir\ \
+  --task_filter CARIT \
+  --batch_size 1 \
+  --epochs 1 \
+  --max_files 2 \
+  --num_workers 0 \
   --use_sde
 ```
 
@@ -82,9 +83,9 @@ Evaluate frozen-backbone representations with an MLP head:
 
 ```bash
 python eval/age_sex.py \
-  --checkpoint results/brainmech_hcpa/best_model.pt \
+  --checkpoint best_model.pt \
   --dataset HCPA \
-  --data_dir data/HCPA/BOLD
+  --data_dir \dataset_dir\
 ```
 
 ## 3. Disease Diagnosis
@@ -92,9 +93,9 @@ Run disease diagnosis on ABIDE/ADNI/PPMI:
 
 ```bash
 python eval/disease_diagnosis.py \
-  --checkpoint results/brainmech_hcpa/best_model.pt \
+  --checkpoint best_model.pt \
   --dataset ABIDE \
-  --labels_file data/ABIDE/labels.csv
+  --labels_file /dataset_dir/labels.csv
 ```
 
 ## 4. Unified Downstream Evaluation
@@ -102,13 +103,13 @@ Single entry for downstream tasks:
 
 ```bash
 python eval/evaluate_downstream.py \
-  --checkpoint results/brainmech_hcpa/best_model.pt \
+  --checkpoint best_model.pt \
   --dataset ABIDE \
-  --data_dir data/ABIDE/BOLD \
+  --data_dir \dataset_dir\ \
   --task_type classification
 ```
 
-## ⚙️ Configuration
+## Configuration
 Hyperparameters are set via command line arguments in `training/train_with_mae.py`. Key options:
 
 - `--koopman_rank`: DPLR rank $r$.
