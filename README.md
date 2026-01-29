@@ -1,4 +1,4 @@
-# BrainMech: Mechanistic Foundation Model (Anonymous)
+# BrainMech: A Mechanistic Foundation Model for Human Brain Dynamics Across Lifespan (Anonymous)
 
 **[Supplementary Code for ICML 2026 Submission]**
 
