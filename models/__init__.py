@@ -1,59 +1,51 @@
 """
-Koopman Foundation Model - V2 Architecture
-Based on real graph structure, structured Koopman operators, and stochastic dynamics
+BrainMech Brain Model - Architecture
+Based on Real Graph Structure, Structured Koopman Operators, and Stochastic Dynamics
 """
 
-# V2 Core Components
-from .graph_spatial_encoder_real import GraphSpatialEncoderReal, ChebConv, GraphAttentionLayer
-from .temporal_transformer import TemporalTransformer, PositionalEncoding
+# BrainMech Brain Model Core Components
+from .graph_spatial_encoder import GraphSpatialEncoder, ChebConv, GraphAttentionLayer
+from .temporal_encoder import TemporalTransformer, PositionalEncoding
 from .episodic_feedback import EpisodicFeedbackTransformer
-from .task_context_encoder import TaskContextEncoder
+from .task_context import TaskContextEncoder
 from .control_fusion import ControlFusion
-from .koopman_core_structured import DPLRKoopmanCore
-from .decoder_stochastic import StochasticDecoder, CognitiveStateReadoutStochastic
+from .koopman_DPLR_core import DPLRKoopmanCore
+from .stochastic_decoder import StochasticDecoder
 from .regularizers import SpectralRegularizer, GraphPriorRegularizer, ConsistencyRegularizer
 
-# V2 Models
-from .koopman_brain_model_v2 import KoopmanBrainModelV2
+# BrainMech Brain Model Models
+from .brain_model import BrainMechBrainModel
 
-# V2 Extensions
+# BrainMech Brain Model Extensions
 from .masked_pretraining import MaskedAutoencoderWrapper
 
 __all__ = [
-    # Graph Encoders
-    'GraphSpatialEncoderReal',
+    # Graph Spatial Encoder
+    'GraphSpatialEncoder',
     'ChebConv',
     'GraphAttentionLayer',
     
-    # Temporal
+    # Temporal Encoder
     'TemporalTransformer',
     'PositionalEncoding',
     
-    # Control System
+    # Control Fusion Module
     'EpisodicFeedbackTransformer',
     'TaskContextEncoder',
     'ControlFusion',
     
-    # Koopman Cores
+    # Structured Koopman Operator (DPLR Koopman Core)
     'DPLRKoopmanCore',
     
-    # Decoders
+    # Stochastic Decoder
     'StochasticDecoder',
-    'CognitiveStateReadoutStochastic',
     
-    # Regularizers
+    # Regularizers (Spectral Regularizer, Graph Prior Regularizer, Consistency Regularizer)
     'SpectralRegularizer',
     'GraphPriorRegularizer',
     'ConsistencyRegularizer',
     
-    # Main Models (V2)
-    'KoopmanBrainModelV2',
-    'KoopmanDiffusionModel',
-    
-    # Diffusion
-    'ResidualDiffusion',
-    
-    # Pretraining
-    'MaskedAutoencoderWrapper',
+    # Main Models (BrainMech Brain Model)
+    'BrainMechBrainModel',
 ]
 

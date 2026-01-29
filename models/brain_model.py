@@ -50,34 +50,34 @@ class BrainMechBrainModel(nn.Module):
         d_task: int = 32,
         n_classes: int = 4,
         task_type: str = 'classification',
-        # Graph spatial encoder params
+        # Graph Spatial Encoder Params
         graph_type: str = 'cheb',
         n_graph_layers: int = 3,
         cheb_k: int = 3,
         drop_edge_p: float = 0.1,
-        # Temporal encoder params
+        # Temporal Encoder Params
         n_temporal_layers: int = 3,
         n_heads: int = 8,
-        # Structured Koopman operator params
+        # Structured Koopman Operator Params
         koopman_rank: int = 16,
         spectral_radius: float = 0.95,
         use_sde: bool = True,
         diffusion_mode: str = 'learned',
         init_noise_std: float = 0.01,
-        # Decoder params
+        # Decoder Params
         uncertainty_mode: str = 'heteroscedastic',
         # Optional FC matrix
         fc_matrix: Optional[torch.Tensor] = None,
         dropout: float = 0.1,
-        # Control system flags
+        # Control System Flags
         use_episodic_feedback: bool = True,
         use_task_context: bool = True,
         use_control_fusion: bool = True,
         use_temporal_encoder: bool = True,
         use_spatial_encoder: bool = True,
-        # Age prediction (auxiliary task for pretraining)
+        # Age Prediction (Auxiliary Task for Pretraining)
         use_age_prediction: bool = False,
-        # Stochastic decoder params
+        # Stochastic Decoder Params
         detach_sigma_head: bool = False,
         sigma_calibration: str = 'none',
         sigma_max_time_steps: int = 512,
@@ -98,7 +98,7 @@ class BrainMechBrainModel(nn.Module):
             drop_edge_p: DropEdge probability
             n_temporal_layers: Number of transformer layers
             n_heads: Number of attention heads
-            koopman_rank: Rank for DPLR decomposition
+            koopman_rank: Rank for DPLR Decomposition
             spectral_radius: Target spectral radius
             use_sde: Whether to use stochastic dynamics
             diffusion_mode: 'learned', 'fixed', or 'none'
@@ -109,23 +109,24 @@ class BrainMechBrainModel(nn.Module):
             use_episodic_feedback: Enable episodic feedback module (default: True)
             use_task_context: Enable task context encoder (default: True)
             use_control_fusion: Enable control fusion module (default: True)
-            use_temporal_transformer: Enable temporal transformer (default: True)
-            use_cognitive_readout: Enable cognitive readout head (default: True)
+            use_temporal_encoder: Enable temporal encoder (default: True)
             use_spatial_encoder: Enable graph spatial encoder (default: True)
-            temporal_model: 'transformer' or 'mamba' for temporal modeling (default: 'transformer')
-            use_dual_path_mamba: If True, use TemporalMambaBi with separate causal/bi paths (default: False)
+            use_age_prediction: Enable age prediction (default: False)
+            detach_sigma_head: Whether to detach sigma head (default: False)
+            sigma_calibration: 'none', 'linear', or 'sigmoid' (default: 'none')
+            sigma_max_time_steps: Maximum time steps for sigma calibration (default: 512)
             
         Ablation Study Usage:
             To disable specific modules for ablation studies, set the corresponding flag to False:
             
-            # Example: Train without episodic feedback
-            model = KoopmanBrainModelV2(
+            # Example: Train without Episodic Feedback
+            model = BrainMechBrainModel(
                 n_roi=116,
                 use_episodic_feedback=False,  # Disable episodic feedback
                 ...
             )
             
-            # Example: Train without control system (episodic + task context + fusion)
+            # Example: Train without Control System (Episodic + Task Context + Fusion)
             model = KoopmanBrainModelV2(
                 n_roi=116,
                 use_episodic_feedback=False,
@@ -135,12 +136,13 @@ class BrainMechBrainModel(nn.Module):
             )
             
             # Example: Train with only basic encoder-decoder (no temporal, no control)
-            model = KoopmanBrainModelV2(
+            model = BrainMechBrainModel(
                 n_roi=116,
-                use_temporal_transformer=False,
+                use_temporal_encoder=False,
                 use_episodic_feedback=False,
                 use_task_context=False,
                 use_control_fusion=False,
+                use_spatial_encoder=False,
                 ...
             )
         """
@@ -170,7 +172,7 @@ class BrainMechBrainModel(nn.Module):
         
         # 1. Graph spatial encoder
         if self.use_spatial_encoder:
-            self.spatial_encoder = GraphSpatialEncoderReal(
+            self.spatial_encoder = GraphSpatialEncoder(
                 n_roi=n_roi,
                 d_latent=d_latent,
                 n_layers=n_graph_layers,
@@ -183,7 +185,7 @@ class BrainMechBrainModel(nn.Module):
                 use_temporal_encoding=True
             )
         else:
-            # Simple linear projection as baseline (for ablation)
+            # Simple Linear Projection as Baseline (for Ablation)
             self.spatial_encoder = nn.Linear(n_roi, d_latent)
         
         # 2. Temporal encoder
@@ -195,7 +197,7 @@ class BrainMechBrainModel(nn.Module):
                     dropout=dropout
                 )
         else:
-            # Identity (no temporal processing) (for ablation)
+            # Identity (no temporal processing) (for Ablation)
             self.temporal_model_instance = nn.Identity()
         
         # 3. Episodic feedback module
@@ -312,7 +314,7 @@ class BrainMechBrainModel(nn.Module):
         if self.use_control_fusion:
             control_signal = self.control_fusion(episodic_summary, context_embedding)  # [B, T, d_control]
         else:
-            # Zero control signal (no control input)
+            # Zero Control Signal (no control input)
             control_signal = torch.zeros(B, T, self.d_control, device=x.device, dtype=x.dtype)
         
         # 4. Structured Koopman operator
@@ -325,10 +327,10 @@ class BrainMechBrainModel(nn.Module):
         # 5. Stochastic decoder
         mu_recon, sigma_recon = self.decoder(z_temporal, return_uncertainty=return_uncertainty)
         
-        # or prediction objectives
+        # 6. Prediction Objectives
         mu_forecast, sigma_forecast = self.decoder(z_next[:, :-1, :], return_uncertainty=return_uncertainty)
         
-        # 6. Age predictions (auxiliary task for pretraining)
+        # 7. Age Predictions (Auxiliary Task for Pretraining)
         if self.use_age_prediction:
             age_pred, age_unc = self.age_predictor(
                 z_temporal,
@@ -340,7 +342,7 @@ class BrainMechBrainModel(nn.Module):
             age_pred = None
             age_unc = None
         
-        # Prepare outputs
+        # Prepare Outputs
         outputs = {
             # Predictions (means)
             'x_recon': mu_recon,           # [B, T, N_ROI]
@@ -361,7 +363,7 @@ class BrainMechBrainModel(nn.Module):
                 'age_uncertainty': age_unc,              # [B] (age uncertainty)
             })
         
-        # Components for analysis (legacy, kept for backward compatibility)
+        # Components for Analysis (Legacy, Kept for Backward Compatibility)
         if return_components:
             components = {
                 'z_spatial': z_spatial,
@@ -372,7 +374,7 @@ class BrainMechBrainModel(nn.Module):
             }
             outputs['components'] = components
         
-        # Intermediates for module-level probe losses
+        # Intermediates for Module-Level Probe Losses
         if return_intermediates:
             intermediates = {
                 'z_spatial': z_spatial,  # [B, T, d_latent]
@@ -411,14 +413,14 @@ class BrainMechBrainModel(nn.Module):
         if loss_weights is None:
             loss_weights = {
                 'recon': 1.0,
-                'forecast': 0.0, # Default to reconstruction only
+                'forecast': 0.0, # Default to Reconstruction Only
                 'consistency': 0.5,
                 'spectral': 0.1,
-                'age': 0.0, # Default to reconstruction only
+                'age': 0.0, # Default to Reconstruction Only
             }
         
-        # Training losses (weighted, included in total_loss)
-        # 1. Reconstruction loss (NLL if uncertainty available)
+        # Training Losses (Weighted, Included in Total Loss)
+        # 1. Reconstruction Loss (NLL if Uncertainty Available)
         recon_weight = loss_weights.get('recon', 0.0)
         if recon_weight > 0:
             if 'sigma_recon' in outputs and outputs['sigma_recon'] is not None:
@@ -428,16 +430,16 @@ class BrainMechBrainModel(nn.Module):
                 mu = outputs['x_recon']
                 nll = 0.5 * torch.log(2 * torch.pi * sigma**2 + 1e-8) + \
                       0.5 * (x_target - mu)**2 / (sigma**2 + 1e-8)
-                # Raw, unweighted NLL for logging
+                # Raw, Unweighted NLL for Logging
                 losses['recon_nll_raw'] = nll.mean().detach()
                 losses['recon_loss'] = nll.mean() * recon_weight
             else:
-                # Standard MSE (weighted) when no sigma
+                # Standard MSE (Weighted) when no sigma
                 mse = F.mse_loss(outputs['x_recon'], x_target)
                 losses['recon_loss'] = mse * recon_weight
         # If recon_weight == 0, we still keep raw MSE metrics above, but do not add recon_loss
         
-        # 2. Forecast loss (NLL if uncertainty available)
+        # 2. Forecast Loss (NLL if Uncertainty Available)
         forecast_weight = loss_weights.get('forecast', 0.0)
         if forecast_weight > 0 and 'x_forecast' in outputs and outputs['x_forecast'] is not None:
             x_forecast_target = x_target[:, 1:, :]
@@ -451,27 +453,27 @@ class BrainMechBrainModel(nn.Module):
             else:
                 losses['forecast_loss'] = F.mse_loss(outputs['x_forecast'], x_forecast_target) * forecast_weight
         
-        # 3. Age prediction loss (auxiliary task for pretraining)
+        # 3. Age Prediction Loss (Auxiliary Task for Pretraining)
         age_weight = loss_weights.get('age', 0.0)
         if age_weight > 0 and age_target is not None:
-            # Age is regression, use MSE loss
+            # Age is Regression, use MSE Loss
             age_pred = outputs['age_predictions']  # [B]
             losses['age_loss'] = F.mse_loss(age_pred, age_target) * age_weight
             losses['age_mse_raw'] = F.mse_loss(age_pred, age_target).detach()
         
-        # 4. Consistency regularization (latent dynamics)
+        # 4. Consistency Regularization (Latent Dynamics)
         consistency_weight = loss_weights.get('consistency', 0.0)
         if consistency_weight > 0:
             z_true_next = outputs['z_latent'][:, 1:, :]
             z_pred_next = outputs['z_next'][:, :-1, :]
             losses['consistency_loss'] = self.consistency_regularizer(z_pred_next, z_true_next) * consistency_weight
         
-        # 5. Spectral regularization on K matrix
+        # 5. Spectral Regularization on K Matrix
         if loss_weights.get('spectral', 0.0) > 0:
             K_matrix = self.koopman_core.get_K_matrix()
             losses['spectral_loss'] = self.spectral_regularizer(K_matrix) * loss_weights.get('spectral', 0.1)
         
-        # Total loss: only sum training losses (exclude raw metrics)
+        # Total Loss: Only Sum Training Losses (Exclude Raw Metrics)
         TRAIN_LOSS_KEYS = [
             'recon_loss', 'forecast_loss', 'cognitive_loss', 'consistency_loss', 'spectral_loss'
         ]
@@ -503,7 +505,7 @@ class BrainMechBrainModel(nn.Module):
         """
         B, T, N = x.shape
         
-        # Initial encoding
+        # Initial Encoding
         if self.use_spatial_encoder:
             z_spatial = self.spatial_encoder(x, fc_matrix=fc_matrix)
         else:
@@ -511,19 +513,19 @@ class BrainMechBrainModel(nn.Module):
             z_flat = self.spatial_encoder(x_flat)
             z_spatial = z_flat.reshape(B, T, self.d_latent)
         
-        # Temporal modeling
+        # Temporal Modeling
         if self.is_dual_path:
             z_temporal, _ = self.temporal_model_instance(z_spatial)
         else:
             z_temporal = self.temporal_model_instance(z_spatial)
         
-        # Get episodic summary (fixed for entire rollout)
+        # Get Episodic Summary (Fixed for Entire Rollout)
         if self.use_episodic_feedback:
             episodic_summary = self.episodic_feedback(z_temporal)
         else:
             episodic_summary = torch.zeros(B, self.d_episodic, device=x.device, dtype=x.dtype)
         
-        # Prepare extended context
+        # Prepare Extended Context
         T_extended = T + horizon
         if self.use_task_context and task_vectors is not None:
             context_embedding = self.task_context(task_vectors)
@@ -533,13 +535,13 @@ class BrainMechBrainModel(nn.Module):
                 device=x.device, dtype=x.dtype
             )
         
-        # Generate extended control signals
+        # Generate Extended Control Signals
         if self.use_control_fusion:
             control_extended = self.control_fusion(episodic_summary, context_embedding)
         else:
             control_extended = torch.zeros(B, T_extended, self.d_control, device=x.device, dtype=x.dtype)
         
-        # Rollout from last observed state
+        # Rollout from Last Observed State
         z_0 = z_temporal[:, -1, :]  # [B, d_latent]
         controls_future = control_extended[:, T:, :]  # [B, horizon, d_control]
         
@@ -550,7 +552,7 @@ class BrainMechBrainModel(nn.Module):
             return_uncertainty=return_uncertainty
         )  # [B, horizon+1, d_latent]
         
-        # Decode to ROI space
+        # Decode to ROI Space
         z_rollout_decode = z_rollout[:, 1:, :]  # Skip initial state
         mu_rollout, sigma_x_rollout = self.decoder(z_rollout_decode, return_uncertainty=return_uncertainty)
         
@@ -562,11 +564,11 @@ class BrainMechBrainModel(nn.Module):
         }
     
     def get_spectral_radius(self) -> float:
-        """Get current spectral radius of Koopman operator"""
+        """Get Current Spectral Radius of Koopman Operator"""
         return self.koopman_core.get_spectral_radius()
     
     def get_param_stats(self) -> dict:
-        """Get parameter statistics including reduction factors"""
+        """Get Parameter Statistics Including Reduction Factors"""
         koopman_stats = self.koopman_core.get_num_params()
         
         total_params = sum(p.numel() for p in self.parameters())
@@ -580,8 +582,8 @@ class BrainMechBrainModel(nn.Module):
 
 
 if __name__ == "__main__":
-    # Test V2 model
-    print("Koopman Brain Model V2 - Structured & Stochastic")
+    # Test BrainMech Brain Model
+    print("BrainMech Brain Model - Structured & Stochastic")
     print("=" * 60)
     
     # Model parameters
@@ -589,17 +591,17 @@ if __name__ == "__main__":
     batch_size = 4
     seq_len = 100
     
-    # Create dummy data
+    # Create Dummy Data
     x = torch.randn(batch_size, seq_len, n_roi)
     task_vectors = torch.randn(batch_size, seq_len, 32)
     cognitive_labels = torch.randint(0, 4, (batch_size,))
     
-    # Create dummy FC matrix
+    # Create Dummy FC Matrix
     fc_matrix = torch.randn(n_roi, n_roi)
     fc_matrix = (fc_matrix + fc_matrix.T) / 2
     fc_matrix = torch.abs(fc_matrix)
     
-    # Create model
+    # Create Model
     model = BrainMechBrainModel(
         n_roi=n_roi,
         d_latent=128,
@@ -612,7 +614,7 @@ if __name__ == "__main__":
         fc_matrix=fc_matrix
     )
     
-    # Forward pass
+    # Forward Pass
     print("\n1. Forward Pass")
     outputs = model(x, task_vectors, return_uncertainty=True, return_components=True)
     
@@ -627,13 +629,13 @@ if __name__ == "__main__":
     print(f"    cognitive_predictions: {outputs['cognitive_predictions'].shape}")
     print(f"    cognitive_uncertainty: {outputs['cognitive_uncertainty'].shape if outputs['cognitive_uncertainty'] is not None else None}")
     
-    # Compute losses
+    # Compute Losses
     print("\n2. Losses")
     losses = model.compute_losses(outputs, x, cognitive_labels)
     for key, value in losses.items():
         print(f"    {key}: {value.item():.6f}")
     
-    # Parameter analysis
+    # Parameter Analysis
     print("\n3. Parameter Analysis")
     stats = model.get_param_stats()
     print(f"  Koopman K reduction: {stats['k_reduction']:.2f}x")
@@ -641,10 +643,10 @@ if __name__ == "__main__":
     print(f"  Total parameters: {stats['total_params']:,}")
     print(f"  Trainable parameters: {stats['trainable_params']:,}")
     
-    # Spectral radius
+    # Spectral Radius
     print(f"\n4. Spectral radius: {model.get_spectral_radius():.4f}")
     
-    # Multi-step rollout
+    # Multi-step Rollout
     print("\n5. Multi-step Rollout")
     task_extended = torch.randn(batch_size, seq_len + 8, 32)
     rollout_outputs = model.multistep_rollout(x, task_extended, horizon=8, return_uncertainty=True)

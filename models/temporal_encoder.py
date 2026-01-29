@@ -109,24 +109,21 @@ class TemporalTransformer(nn.Module):
 
 
 if __name__ == "__main__":
-    # Test module
+    # Test Temporal Transformer
     B, T, d_latent = 4, 100, 128
     
-    # Create transformer
     transformer = TemporalTransformer(
         d_latent=d_latent,
         n_heads=8,
         n_layers=3
     )
     
-    # Test forward pass
     z = torch.randn(B, T, d_latent)
     z_out = transformer(z)
     
     print(f"Input shape: {z.shape}")
     print(f"Output shape: {z_out.shape}")
     
-    # Test with causal mask
     mask = transformer.create_causal_mask(T, z.device)
     z_causal = transformer(z, mask=mask)
     print(f"Causal output shape: {z_causal.shape}")
