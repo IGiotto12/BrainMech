@@ -11,7 +11,7 @@ from typing import Optional
 
 class SpectralRegularizer(nn.Module):
     """
-    Spectral Regularization for Koopman Matrix
+    Spectral regularization for Koopman matrix
     Penalizes spectral radius exceeding target for stability
     """
     
@@ -36,8 +36,10 @@ class SpectralRegularizer(nn.Module):
             eigenvals, _ = torch.linalg.eig(K_matrix)
             max_eigenval = torch.max(torch.abs(eigenvals))
         except:
+            # Fallback to matrix norm if eigenvalue computation fails
             max_eigenval = torch.norm(K_matrix, p=2)
         
+        # Penalty for exceeding spectral radius
         spectral_loss = F.relu(max_eigenval - self.spectral_radius) ** 2
         
         return self.weight * spectral_loss
@@ -45,7 +47,7 @@ class SpectralRegularizer(nn.Module):
 
 class GraphPriorRegularizer(nn.Module):
     """
-    Graph Prior Regularization
+    Graph prior regularization
     Aligns Koopman matrix structure with brain connectome topology
     """
     
@@ -67,6 +69,7 @@ class GraphPriorRegularizer(nn.Module):
         self.use_structure_only = use_structure_only
         
         if use_structure_only:
+            # Create binary mask from FC matrix (for structure matching)
             threshold = torch.quantile(torch.abs(fc_matrix), 0.5)
             self.register_buffer('fc_mask', (torch.abs(fc_matrix) > threshold).float())
     
@@ -79,14 +82,20 @@ class GraphPriorRegularizer(nn.Module):
         """
         if self.use_structure_only and hasattr(self, 'fc_mask'):
             # Match sparsity structure
+            # Resize mask if dimensions don't match
             if K_matrix.shape != self.fc_mask.shape:
+                # Use Frobenius norm on K matrix weighted by fc_mask pattern
+                # This is a simplified version when dimensions differ
                 graph_loss = torch.norm(K_matrix, p='fro') * 0.01
             else:
+                # Encourage K to be sparse where FC is sparse
                 graph_loss = torch.sum((K_matrix ** 2) * (1 - self.fc_mask))
         else:
+            # Match FC matrix values (if dimensions match)
             if K_matrix.shape == self.fc_matrix.shape:
                 graph_loss = F.mse_loss(K_matrix, self.fc_matrix)
             else:
+                # Dimension mismatch - use simple L2 regularization
                 graph_loss = torch.norm(K_matrix, p='fro') * 0.01
         
         return self.weight * graph_loss
@@ -94,7 +103,7 @@ class GraphPriorRegularizer(nn.Module):
 
 class ConsistencyRegularizer(nn.Module):
     """
-    Consistency Regularization between Predicted and True Next States
+    Consistency regularization between predicted and true next states
     Ensures Koopman dynamics match the actual latent dynamics
     """
     
@@ -119,7 +128,7 @@ class ConsistencyRegularizer(nn.Module):
 
 
 if __name__ == "__main__":
-    # Test Spectral Regularizer
+    # Test spectral regularizer
     d_latent = 128
     K = torch.randn(d_latent, d_latent) * 0.1
     
@@ -127,17 +136,17 @@ if __name__ == "__main__":
     spectral_loss = spectral_reg(K)
     print(f"Spectral loss: {spectral_loss.item():.6f}")
     
-    # Test Graph Prior Regularizer
+    # Test graph prior regularizer
     n_roi = 116
     fc_matrix = torch.randn(n_roi, n_roi)
-    fc_matrix = (fc_matrix + fc_matrix.T) / 2
+    fc_matrix = (fc_matrix + fc_matrix.T) / 2  # Symmetric
     
     graph_reg = GraphPriorRegularizer(fc_matrix, weight=0.1)
     K_small = torch.randn(n_roi, n_roi) * 0.1
     graph_loss = graph_reg(K_small)
     print(f"Graph prior loss: {graph_loss.item():.6f}")
     
-    # Test Consistency Regularizer
+    # Test consistency regularizer
     B, T, d = 4, 100, 128
     z_pred = torch.randn(B, T, d)
     z_true = torch.randn(B, T, d)

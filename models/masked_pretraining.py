@@ -34,7 +34,7 @@ class MaskedAutoencoderWrapper(nn.Module):
     ):
         """
         Args:
-            base_model: BrainMechBrainModel to wrap
+            base_model: KoopmanBrainModel to wrap
             mask_ratio: Fixed ratio of input to mask (0.0-1.0) - used if use_random_masking=False
             mask_strategy: 'random', 'block', or 'structured'
             mask_type: 'spatial' (mask ROIs), 'temporal' (mask timepoints), or 'both' (mask both)
@@ -261,46 +261,46 @@ class MaskedAutoencoderWrapper(nn.Module):
         use_masking: bool = True,
         epoch: int = None,
         max_epochs: int = None,
-        return_intermediates: bool = False,  # Support Return Intermediates for Shape Debug
+        return_intermediates: bool = False,  # Support return_intermediates for shape debug
         **kwargs  # Accept extra kwargs but filter them out (e.g., 'age' from metadata)
     ) -> dict:
         """
-        Forward with Optional Masking and Adaptive Masking Ratio
+        Forward with optional masking and adaptive masking ratio
         
         Args:
             x: [B, T, N_ROI] - Input
-            task_vectors: Optional Task Vectors
+            task_vectors: Optional task vectors
             fc_matrix: [B, N_ROI, N_ROI] or [N_ROI, N_ROI] - Optional FC matrices
-            use_masking: Whether to Apply MAE Masking
+            use_masking: Whether to apply MAE masking
             epoch: Current epoch (for curriculum learning)
             max_epochs: Total number of epochs
         
         Returns:
-            outputs: Dict with Model Outputs + Mask Info
+            outputs: Dict with model outputs + mask info
         """
         B, T, N = x.shape
         mask_ratio = None
         
         if use_masking and self.training:
-            # Create Mask with Adaptive Ratio
+            # Create mask with adaptive ratio
             if self.mask_type == 'both':
-                # Combined Spatial and Temporal Masking
+                # Combined spatial and temporal masking
                 if self.mask_strategy == 'random':
-                    # Create Spatial Mask
+                    # Create spatial mask
                     mask_spatial, ratio_spatial = self.create_random_mask(
                         (B, N), epoch, max_epochs, custom_ratio=self.spatial_mask_ratio
                     )
                     mask_spatial = mask_spatial.to(x.device).unsqueeze(1).expand(B, T, N)
                     
-                    # Create Temporal Mask
+                    # Create temporal mask
                     mask_temporal, ratio_temporal = self.create_random_mask(
                         (B, T), epoch, max_epochs, custom_ratio=self.temporal_mask_ratio
                     )
                     mask_temporal = mask_temporal.to(x.device).unsqueeze(-1).expand(B, T, N)
                     
-                    # Combine: Mask where EITHER Spatial OR Temporal Mask is 0 (OR Operation)
+                    # Combine: mask where EITHER spatial OR temporal mask is 0 (OR operation)
                     # In mask: 1 = keep, 0 = mask
-                    # So Combined Mask = Spatial Mask AND Temporal Mask (Both Must be 1 to Keep)
+                    # So combined mask = spatial_mask AND temporal_mask (both must be 1 to keep)
                     mask = mask_spatial * mask_temporal
                     mask_ratio = 1.0 - mask.mean().item()  # Actual masked ratio
                 
@@ -325,7 +325,7 @@ class MaskedAutoencoderWrapper(nn.Module):
                     mask, mask_ratio = self.create_random_mask((B, N), epoch, max_epochs)
                     mask = mask.to(x.device)
                     mask = mask.unsqueeze(1).expand(B, T, N)
-                else:
+                else:  # temporal
                     mask, mask_ratio = self.create_random_mask((B, T), epoch, max_epochs)
                     mask = mask.to(x.device)
                     mask = mask.unsqueeze(-1).expand(B, T, N)
@@ -338,14 +338,14 @@ class MaskedAutoencoderWrapper(nn.Module):
                 mask = self.create_structured_mask(B, T, N).to(x.device)
                 mask_ratio = self.get_adaptive_mask_ratio(epoch, max_epochs)
             
-            # Apply Mask
+            # Apply mask
             x_masked, mask = self.apply_mask(x, mask)
         else:
             x_masked = x
             mask = torch.ones_like(x)
             mask_ratio = 0.0
         
-        # Forward Through Base Model
+        # Forward through base model
         outputs = self.base_model(
             x_masked, 
             task_vectors=task_vectors, 
@@ -353,7 +353,7 @@ class MaskedAutoencoderWrapper(nn.Module):
             return_intermediates=return_intermediates  # Pass through for shape debug and probe losses
         )
         
-        # Add Mask Information
+        # Add mask information
         outputs['mask'] = mask
         outputs['x_original'] = x
         outputs['x_masked'] = x_masked
@@ -367,103 +367,106 @@ class MaskedAutoencoderWrapper(nn.Module):
         use_masked_loss: bool = True
     ) -> dict:
         """
-        Compute Composite MSE+MAE Loss
+        Compute composite MSE+MAE loss
         
         Args:
-            outputs: Model Outputs (Must Include 'mask', 'x_original')
-            use_masked_loss: If True, Compute Loss Only on Masked Regions
+            outputs: Model outputs (must include 'mask', 'x_original')
+            use_masked_loss: If True, compute loss only on masked regions
         
         Returns:
-            losses: Dict of Loss Components
+            losses: Dict of loss components
         """
         x_original = outputs['x_original']
         x_recon = outputs['x_recon']
         mask = outputs['mask']
         
         if use_masked_loss and self.training:
-            # Compute Loss Only on MASKED Regions (Like MAE)
+            # Compute loss only on MASKED regions (like MAE)
             masked_regions = (1 - mask)  # Invert mask (1 where masked)
             
-            # MSE on Masked Parts
+            # MSE on masked parts
             mse_masked = torch.sum(
                 ((x_recon - x_original) ** 2) * masked_regions
             ) / (masked_regions.sum() + 1e-8)
             
-            # MAE on Masked Parts
+            # MAE on masked parts
             mae_masked = torch.sum(
                 torch.abs(x_recon - x_original) * masked_regions
             ) / (masked_regions.sum() + 1e-8)
             
-            # Composite Loss on Masked Regions (MSE + MAE)
+            # Composite loss on masked regions (MSE + MAE)
             masked_recon_loss = mse_masked + mae_masked
             
-            # MSE on Unmasked Parts
+            # MSE on unmasked parts
             mse_unmasked = torch.sum(
                 ((x_recon - x_original) ** 2) * mask
             ) / (mask.sum() + 1e-8)
             
-            # MAE on Unmasked Parts
+            # MAE on unmasked parts
             mae_unmasked = torch.sum(
                 torch.abs(x_recon - x_original) * mask
             ) / (mask.sum() + 1e-8)
             
-            # Composite Loss on Unmasked Regions (MSE + MAE)
+            # Composite loss on unmasked regions (MSE + MAE)
             unmasked_recon_loss = mse_unmasked + mae_unmasked
             
-            # Combine (Weighted: Focus More on Masked Regions)
+            # Combine (weighted: focus more on masked regions)
             recon_loss = masked_recon_loss * 2.0 + unmasked_recon_loss * 1.0
             recon_mse = mse_masked * 2.0 + mse_unmasked * 1.0
             recon_mae = mae_masked * 2.0 + mae_unmasked * 1.0
             
-            # Raw Metrics (Unweighted, for Consistent Reporting)
+            # Raw metrics (unweighted, for consistent reporting)
             recon_mse_raw = torch.mean((x_recon - x_original) ** 2)
             recon_mae_raw = torch.mean(torch.abs(x_recon - x_original))
         else:
-            # Standard Composite Loss (No Masking) - MSE + MAE
+            # Standard composite loss (no masking) - MSE + MAE
             recon_mse = torch.mean((x_recon - x_original) ** 2)
             recon_mae = torch.mean(torch.abs(x_recon - x_original))
             recon_loss = recon_mse + recon_mae
             
-            # Raw Metrics (Same as Weighted in This Case)
+            # Raw metrics (same as weighted in this case)
             recon_mse_raw = recon_mse
             recon_mae_raw = recon_mae
         
-        # Forecast Loss (Composite MSE + MAE)
+        # Forecast loss (composite MSE + MAE)
         x_forecast_target = x_original[:, 1:, :]
         forecast_mse = torch.mean((outputs['x_forecast'] - x_forecast_target) ** 2)
         forecast_mae = torch.mean(torch.abs(outputs['x_forecast'] - x_forecast_target))
         forecast_loss = forecast_mse + forecast_mae
         
-        # Consistency Loss
+        # Consistency loss
         z_true_next = outputs['z_latent'][:, 1:, :]
         z_pred_next = outputs['z_next'][:, :-1, :]
         consistency_loss = torch.mean((z_pred_next - z_true_next) ** 2) * 0.5
         
-        # Spectral Loss
-        # Handle both:
-        # - legacy linear Koopman cores exposing `.K`
-        # - structured DPLR Koopman cores exposing `get_K_matrix()`
+        # Spectral loss
+        # Handle both V1 (KoopmanLinearCore with .K) and V2 (DPLRKoopmanCore with get_K_matrix())
         koopman_core = self.base_model.koopman_core
         if hasattr(koopman_core, 'K'):
+            # V1 model: direct K attribute
             K_matrix = koopman_core.K
         elif hasattr(koopman_core, 'get_K_matrix'):
+            # V2 model: DPLR decomposition, need to compute full matrix
             K_matrix = koopman_core.get_K_matrix()
         else:
+            # Fallback: skip spectral loss if K matrix not accessible
             K_matrix = None
         
         if K_matrix is not None:
             spectral_loss = self.base_model.spectral_regularizer(K_matrix)
         else:
+            # If spectral regularizer not available, use zero loss
             spectral_loss = torch.tensor(0.0, device=outputs['x_recon'].device)
         
+        # Total
         total_loss = recon_loss + forecast_loss + consistency_loss + spectral_loss
         
         losses = {
             'recon_loss': recon_loss,
             'recon_mse': recon_mse,
             'recon_mae': recon_mae,
-            'recon_mse_raw': recon_mse_raw.detach(),
-            'recon_mae_raw': recon_mae_raw.detach(),
+            'recon_mse_raw': recon_mse_raw.detach(),  # Raw metric (not in loss)
+            'recon_mae_raw': recon_mae_raw.detach(),  # Raw metric (not in loss)
             'forecast_loss': forecast_loss,
             'forecast_mse': forecast_mse,
             'forecast_mae': forecast_mae,
@@ -477,10 +480,12 @@ class MaskedAutoencoderWrapper(nn.Module):
 
 
 if __name__ == "__main__":
-    from brain_model import BrainMechBrainModel
+    from koopman_brain_model_v2 import KoopmanBrainModel
     
-    base_model = BrainMechBrainModel(n_roi=116, d_latent=128)
+    # Create base model
+    base_model = KoopmanBrainModel(n_roi=116, d_latent=128)
     
+    # Wrap with MAE
     mae_model = MaskedAutoencoderWrapper(
         base_model=base_model,
         mask_ratio=0.5,
@@ -498,7 +503,7 @@ if __name__ == "__main__":
     print(f"Reconstruction shape: {outputs['x_recon'].shape}")
     print(f"Mask ratio: {outputs['mask'].mean():.2f}")
     
-    # Compute MAE Loss
+    # Compute MAE loss
     losses = mae_model.compute_mae_loss(outputs)
     print(f"\nLosses:")
     for k, v in losses.items():

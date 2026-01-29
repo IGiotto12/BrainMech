@@ -34,8 +34,10 @@ class EpisodicFeedbackTransformer(nn.Module):
         self.d_latent = d_latent
         self.d_episodic = d_episodic
         
+        # Input projection
         self.input_proj = nn.Linear(d_latent, d_episodic)
         
+        # Mini-transformer for episodic processing
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_episodic,
             nhead=n_heads,
@@ -45,6 +47,7 @@ class EpisodicFeedbackTransformer(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, n_layers)
         
+        # Episodic summary projection
         self.summary_proj = nn.Sequential(
             nn.Linear(d_episodic, d_episodic),
             nn.GELU(),
@@ -58,20 +61,27 @@ class EpisodicFeedbackTransformer(nn.Module):
         Returns:
             episodic_summary: [B, d_episodic] - Episodic memory features
         """
-        z_episodic = self.input_proj(z_sequence)
-        z_processed = self.transformer(z_episodic)
+        # Project to episodic space
+        z_episodic = self.input_proj(z_sequence)  # [B, T, d_episodic]
         
-        episodic_summary = torch.mean(z_processed, dim=1)
+        # Apply transformer to capture episodic patterns
+        z_processed = self.transformer(z_episodic)  # [B, T, d_episodic]
+        
+        # Global average pooling to get episodic summary
+        episodic_summary = torch.mean(z_processed, dim=1)  # [B, d_episodic]
+        
+        # Final projection
         episodic_summary = self.summary_proj(episodic_summary)
         
         return episodic_summary
 
 
 if __name__ == "__main__":
-    # Test Episodic Feedback Transformer
+    # Test module
     B, T, d_latent = 4, 100, 128
     d_episodic = 64
     
+    # Create module
     episodic = EpisodicFeedbackTransformer(
         d_latent=d_latent,
         d_episodic=d_episodic,
@@ -79,6 +89,7 @@ if __name__ == "__main__":
         n_layers=2
     )
     
+    # Test forward pass
     z = torch.randn(B, T, d_latent)
     summary = episodic(z)
     

@@ -1,51 +1,54 @@
 """
-BrainMech Brain Model - Architecture
-Based on Real Graph Structure, Structured Koopman Operators, and Stochastic Dynamics
+BrainMech foundation model components
 """
 
-# BrainMech Brain Model Core Components
-from .graph_spatial_encoder import GraphSpatialEncoder, ChebConv, GraphAttentionLayer
-from .temporal_encoder import TemporalTransformer, PositionalEncoding
+# V2 Core Components
+from .graph_spatial_encoder_real import GraphSpatialEncoderReal, ChebConv, GraphAttentionLayer
+from .temporal_transformer import TemporalTransformer, PositionalEncoding
 from .episodic_feedback import EpisodicFeedbackTransformer
-from .task_context import TaskContextEncoder
+from .task_context_encoder import TaskContextEncoder
 from .control_fusion import ControlFusion
-from .koopman_DPLR_core import DPLRKoopmanCore
-from .stochastic_decoder import StochasticDecoder
+from .koopman_core_structured import DPLRKoopmanCore
+from .decoder_stochastic import StochasticDecoder, CognitiveStateReadoutStochastic
 from .regularizers import SpectralRegularizer, GraphPriorRegularizer, ConsistencyRegularizer
 
-# BrainMech Brain Model Models
-from .brain_model import BrainMechBrainModel
+# V2 Models
+from .brainmech import BrainMech
 
-# BrainMech Brain Model Extensions
+# V2 Extensions
 from .masked_pretraining import MaskedAutoencoderWrapper
 
 __all__ = [
-    # Graph Spatial Encoder
-    'GraphSpatialEncoder',
+    # Graph Encoders
+    'GraphSpatialEncoderReal',
     'ChebConv',
     'GraphAttentionLayer',
     
-    # Temporal Encoder
+    # Temporal
     'TemporalTransformer',
     'PositionalEncoding',
     
-    # Control Fusion Module
+    # Control System
     'EpisodicFeedbackTransformer',
     'TaskContextEncoder',
     'ControlFusion',
     
-    # Structured Koopman Operator (DPLR Koopman Core)
+    # Koopman Cores
     'DPLRKoopmanCore',
     
-    # Stochastic Decoder
+    # Decoders
     'StochasticDecoder',
+    'CognitiveStateReadoutStochastic',
     
-    # Regularizers (Spectral Regularizer, Graph Prior Regularizer, Consistency Regularizer)
+    # Regularizers
     'SpectralRegularizer',
     'GraphPriorRegularizer',
     'ConsistencyRegularizer',
     
-    # Main Models (BrainMech Brain Model)
-    'BrainMechBrainModel',
+    # Main Model
+    'BrainMech',
+    
+    # Pretraining
+    'MaskedAutoencoderWrapper',
 ]
 
