@@ -30,28 +30,10 @@ h5py>=3.1.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
 
-# ==============================
-# Development (Optional)
-# ==============================
-
 # Testing
 pytest>=6.2.0
 
 # Jupyter Notebooks
 jupyter>=1.0.0
 ipykernel>=6.0.0
-
-# ==============================
-# Advanced Features (Optional)
-# ==============================
-
-# Temporal Modeling (Mamba)
-mamba-ssm>=1.0.0  # State Space Models for efficient sequence modeling
-
-# Neuroimaging Tools (uncomment if needed)
-# nilearn>=0.8.0
-# nibabel>=3.2.0
-
-# Koopman Comparisons (uncomment if needed)
-# pykoopman>=0.1.0
 
