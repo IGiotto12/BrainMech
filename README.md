@@ -1,6 +1,6 @@
 # BrainMech: A Mechanistic Foundation Model for Human Brain Dynamics Across Lifespan (Anonymous)
 
-**[Supplementary Code for ICML 2026 Submission]**
+**[Supplementary Code for NeurIPS 2026 Submission]**
 
 This repository contains the official PyTorch implementation of **BrainMech**, a mechanistic foundation model for fMRI dynamics grounded in **Neural Koopman Observable State-Space Linearization (NKOSSL)**, **Topology-Aware Spatiotemporal Embedding Network (TASEN)**, and a **DPLR-Koopman** core with stochastic diffusion.
 
