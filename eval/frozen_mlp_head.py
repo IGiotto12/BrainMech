@@ -54,7 +54,7 @@ class FrozenMLPHead(nn.Module):
 
     
 
-    Architecture matches paper methodology:
+    Architecture:
 
     - Pooled backbone features (averaged over time and ROIs) → 
 
@@ -252,7 +252,7 @@ def train_regression_head(
 
     """
 
-    Train regression head (e.g., for age prediction) following paper methodology.
+    Train regression head (e.g., for age prediction).
 
     
 
@@ -280,7 +280,7 @@ def train_regression_head(
 
 
 
-    # Use robust normalization (median/IQR) as mentioned in paper, or standard normalization
+    # Use robust normalization (median/IQR) or standard normalization
 
     if use_robust_norm:
 
@@ -324,9 +324,7 @@ def train_regression_head(
 
     ).to(device)
 
-    criterion = nn.MSELoss()  # MSE for regression tasks (as per paper)
-
-    # Use Adam (not AdamW) to match paper methodology exactly
+    criterion = nn.MSELoss()  # MSE for regression tasks
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -512,7 +510,7 @@ def train_classification_head(
 
     """
 
-    Train classification head (e.g., for sex, diagnosis) following paper methodology.
+    Train classification head (e.g., for sex, diagnosis).
 
     
 
@@ -542,7 +540,7 @@ def train_classification_head(
 
 
 
-    # Use robust normalization (median/IQR) as mentioned in paper, or standard normalization
+    # Use robust normalization (median/IQR) or standard normalization
 
     if use_robust_norm:
 
@@ -600,13 +598,13 @@ def train_classification_head(
 
     else:
 
-        criterion = nn.CrossEntropyLoss(  # Cross-entropy for classification tasks (as per paper)
+        criterion = nn.CrossEntropyLoss(  # Cross-entropy for classification tasks
 
             weight=torch.from_numpy(class_weights).to(device)
 
         )
 
-    # Use Adam (not AdamW) to match paper methodology exactly
+    # Use Adam (not AdamW)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 

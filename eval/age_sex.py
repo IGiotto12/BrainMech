@@ -352,78 +352,6 @@ def load_demographics(csv_path: str, dataset_type: str) -> pd.DataFrame:
 
     
 
-    elif dataset_type.upper() == 'TAOWU':
-
-        # TAOWU format: Subject, Group, Sex, Age
-
-        # Subject IDs are like "032057" (may have leading zeros)
-
-        # Sex is F/M, Age is in years
-
-        print(f"  Processing TAOWU demographics...")
-
-        
-
-        # Find columns (case-insensitive)
-
-        col_map = {c.lower(): c for c in df.columns}
-
-        
-
-        subject_col = col_map.get('subject', col_map.get('subject_id', None))
-
-        age_col = col_map.get('age', None)
-
-        sex_col = col_map.get('sex', col_map.get('gender', None))
-
-        
-
-        if subject_col is None:
-
-            raise ValueError(f"TAOWU: Could not find subject column. Available: {df.columns.tolist()}")
-
-        if age_col is None:
-
-            raise ValueError(f"TAOWU: Could not find age column. Available: {df.columns.tolist()}")
-
-        if sex_col is None:
-
-            raise ValueError(f"TAOWU: Could not find sex column. Available: {df.columns.tolist()}")
-
-        
-
-        demo_df = df[[subject_col, age_col, sex_col]].copy()
-
-        demo_df.columns = ['subject_id', 'age', 'sex']
-
-        
-
-        # Clean subject IDs (keep as string, preserve leading zeros for matching)
-
-        demo_df['subject_id'] = demo_df['subject_id'].astype(str).str.strip()
-
-        # Also create normalized version without leading zeros for flexible matching
-
-        demo_df['subject_id_norm'] = demo_df['subject_id'].str.lstrip('0')
-
-        
-
-        # Convert sex from F/M to 0/1 (0=Female, 1=Male)
-
-        sex_mapping = {'F': 0, 'f': 0, 'Female': 0, 'female': 0, 
-
-                       'M': 1, 'm': 1, 'Male': 1, 'male': 1}
-
-        demo_df['sex'] = demo_df['sex'].map(sex_mapping)
-
-        
-
-        print(f"  ✓ Loaded {len(demo_df)} subjects from TAOWU metadata")
-
-        print(f"    Subject ID examples: {demo_df['subject_id'].head(3).tolist()}")
-
-    
-
     elif dataset_type.upper() == 'PPMI':
 
         # PPMI format: Image Data ID,Subject,Group,Sex,Age,Visit,Modality,Description
@@ -487,74 +415,6 @@ def load_demographics(csv_path: str, dataset_type: str) -> pd.DataFrame:
         
 
         print(f"  ✓ Loaded {len(demo_df)} subjects from PPMI metadata")
-
-        print(f"    Subject ID examples: {demo_df['subject_id'].head(3).tolist()}")
-
-    
-
-    elif dataset_type.upper() == 'NEUROCON':
-
-        # NEUROCON format: Subject,Group,Age,Sex
-
-        # Subject IDs are like "032014" (may have leading zeros)
-
-        print(f"  Processing NEUROCON demographics...")
-
-        
-
-        col_map = {c.lower(): c for c in df.columns}
-
-        
-
-        subject_col = col_map.get('subject', col_map.get('subject_id', None))
-
-        age_col = col_map.get('age', None)
-
-        sex_col = col_map.get('sex', col_map.get('gender', None))
-
-        
-
-        if subject_col is None:
-
-            raise ValueError(f"NEUROCON: Could not find subject column. Available: {df.columns.tolist()}")
-
-        if age_col is None:
-
-            raise ValueError(f"NEUROCON: Could not find age column. Available: {df.columns.tolist()}")
-
-        if sex_col is None:
-
-            raise ValueError(f"NEUROCON: Could not find sex column. Available: {df.columns.tolist()}")
-
-        
-
-        demo_df = df[[subject_col, age_col, sex_col]].copy()
-
-        demo_df.columns = ['subject_id', 'age', 'sex']
-
-        
-
-        # Clean subject IDs (keep as string, preserve leading zeros)
-
-        demo_df['subject_id'] = demo_df['subject_id'].astype(str).str.strip()
-
-        # Create normalized version without leading zeros
-
-        demo_df['subject_id_norm'] = demo_df['subject_id'].str.lstrip('0')
-
-        
-
-        # Convert sex from F/M to 0/1 (0=Female, 1=Male)
-
-        sex_mapping = {'F': 0, 'f': 0, 'Female': 0, 'female': 0, 
-
-                       'M': 1, 'm': 1, 'Male': 1, 'male': 1}
-
-        demo_df['sex'] = demo_df['sex'].map(sex_mapping)
-
-        
-
-        print(f"  ✓ Loaded {len(demo_df)} subjects from NEUROCON metadata")
 
         print(f"    Subject ID examples: {demo_df['subject_id'].head(3).tolist()}")
 
@@ -1640,7 +1500,7 @@ def main():
 
     parser.add_argument('--dataset', type=str, default=None,
 
-                        help='Dataset name (HCPA, UKB, PPMI, TAOWU, etc.)')
+                        help='Dataset name (HCPA, UKB, PPMI, etc.)')
 
     parser.add_argument('--data_dir', type=str, default=None,
 
@@ -1688,7 +1548,7 @@ def main():
 
     parser.add_argument('--min_subjects', type=int, default=50,
 
-                        help='Minimum number of matched subjects required (default: 50, lower for small datasets like TAOWU/NEUROCON)')
+                        help='Minimum number of matched subjects required (default: 50, lower for small datasets)')
 
     parser.add_argument('--mlp_hidden_dims', type=int, nargs='+', default=[128, 64],
 
@@ -1772,7 +1632,7 @@ def main():
 
     # Set dataset_type for data loader (HCPA-style vs UKB-style)
 
-    # PPMI, TAOWU, etc. use similar structure to one of the main types
+    # PPMI etc. use similar structure to one of the main types
 
     if args.dataset_type is None:
 
@@ -2416,7 +2276,7 @@ def main():
 
     # Create DataLoader with appropriate settings
 
-    # For non-standard datasets (PPMI, TAOWU, etc.), use num_workers=0 and custom collate
+    # For non-standard datasets (PPMI etc.), use num_workers=0 and custom collate
 
     # to avoid tensor size mismatch issues
 
@@ -2634,7 +2494,7 @@ def main():
 
     # - UKB format: "1234567.csv" -> "1234567"
 
-    # - TAOWU/PPMI format: "sub-control032057" or "sub-patient032057" -> "032057"
+    # - PPMI format: "sub-control032057" or "sub-patient032057" -> "032057"
 
     import re
 
@@ -2662,13 +2522,13 @@ def main():
 
         
 
-        # Special handling for TAOWU/PPMI/NEUROCON: sub-control032057 or sub-patient032057
+        # Special handling for PPMI: sub-control032057 or sub-patient032057
 
         # Extract just the numeric ID at the end (may have leading zeros like "032057")
 
         # Try multiple patterns to handle various folder naming conventions
 
-        taowu_patterns = [
+        subject_id_patterns = [
 
             r'sub-(?:control|patient|prodromal|swedd)[\(\)]?(?:control|patient)?[\(\)]?(\d+)',  # sub-control032057
 
@@ -2680,13 +2540,13 @@ def main():
 
         ]
 
-        for pattern in taowu_patterns:
+        for pattern in subject_id_patterns:
 
-            taowu_match = re.search(pattern, s_str, re.IGNORECASE)
+            id_match = re.search(pattern, s_str, re.IGNORECASE)
 
-            if taowu_match:
+            if id_match:
 
-                cleaned_subjects.append(taowu_match.group(1))
+                cleaned_subjects.append(id_match.group(1))
 
                 break
 
@@ -2904,7 +2764,7 @@ def main():
 
     
 
-    # Strategy 3: Partial matching (for TAOWU/NEUROCON where folder names might have prefixes)
+    # Strategy 3: Partial matching (for datasets where folder names might have prefixes)
 
     if len(merged_df) < 10:
 

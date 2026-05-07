@@ -4,8 +4,6 @@ Disease Diagnosis Evaluation Script
 Evaluates the pre-trained Koopman Foundation Model on disease diagnosis tasks:
 - ABIDE: Autism Spectrum Disorder (ASD) vs Control (binary)
 - PPMI: 4-class classification (Control, SWEDD, Prodromal, PD)
-- TAOWU: Control vs Patient (binary)
-- NEUROCON: Control vs Patient (binary)
 
 This is a specialized script for classification tasks focusing on disease diagnosis.
 
@@ -493,20 +491,10 @@ class PPMIDatasetNested:
         else:
             print(f"✓ Created {len(self.sequences)} sequence segments from {len(subject_folders)} subjects (sliding window)")
         
-        # Normalize if requested
-        if self.normalize and len(self.sequences) > 0:
-            try:
-                all_data = np.concatenate(self.sequences, axis=0)
-                self.mean = np.mean(all_data, axis=0, keepdims=True)
-                self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
-            except ValueError as e:
-                print(f"  ⚠️  Warning: Could not concatenate sequences for normalization: {e}")
-                print(f"     Using per-sequence normalization")
-                self.mean = None
-                self.std = None
-        else:
-            self.mean = None
-            self.std = None
+        # Per-sequence (within-subject) z-normalization is applied in __getitem__
+        # when self.mean is None — avoids any cross-subject leakage.
+        self.mean = None
+        self.std = None
     
     def _create_segments(self, data: np.ndarray):
         """Create sliding window segments or single window per subject"""
@@ -769,612 +757,6 @@ class PPMISCFCCsvDataset(Dataset):
 
 # Register PPMI dataset (default nested/mat implementation)
 DATASET_REGISTRY['PPMI'] = PPMIDatasetNested
-
-# Create TAOWU dataset class
-class TAOWUDataset:
-    """
-    TAOWU dataset loader for structure:
-    data/taowu/sub-control(patient)xxxx/AAL116_timeseires.mat and AAL116_correlation_matrix.mat
-    data/taowu/sub-patient(patient)xxxx/AAL116_timeseires.mat and AAL116_correlation_matrix.mat
-    """
-    def __init__(
-        self,
-        data_dir: str,
-        labels_file: str = None,
-        label_column: str = 'diagnosis',
-        sequence_length: int = 100,
-        stride: int = 50,
-        normalize: bool = True,
-        max_files: int = None,
-        single_window_per_subject: bool = False
-    ):
-        self.data_dir = Path(data_dir)
-        self.sequence_length = sequence_length
-        self.stride = stride
-        self.normalize = normalize
-        self.label_column = label_column
-        self.labels_file = labels_file
-        self.single_window_per_subject = single_window_per_subject
-        
-        # Find all subject folders matching pattern: sub-control(patient)xxxx or sub-patient(patient)xxxx
-        subject_folders = []
-        for item in self.data_dir.iterdir():
-            if item.is_dir():
-                name_lower = item.name.lower()
-                # Check for sub-control(patient) or sub-patient(patient) pattern
-                if 'sub-control' in name_lower or 'sub-patient' in name_lower:
-                    # Extract label from folder name
-                    is_control = 'control' in name_lower or 'sub-control' in name_lower
-                    subject_folders.append((item, is_control))
-        
-        if max_files:
-            subject_folders = subject_folders[:max_files]
-        
-        print(f"Found {len(subject_folders)} subject folders")
-        
-        # Load labels if provided
-        label_dict = {}
-        if self.labels_file and Path(self.labels_file).exists():
-            df = pd.read_csv(self.labels_file)
-            # Try multiple possible subject ID column names
-            subject_col = None
-            for col in ['Subject', 'subject', 'sub_id', 'subject_id', 'PATNO']:
-                if col in df.columns:
-                    subject_col = col
-                    break
-            if subject_col:
-                for _, row in df.iterrows():
-                    sub_id = str(row[subject_col]).strip()
-                    if sub_id:
-                        label_dict[sub_id] = row.get(self.label_column, None)
-                print(f"✓ Loaded labels for {len(label_dict)} subjects from {self.labels_file}")
-            else:
-                print(f"  ⚠️  Could not find subject column in labels file")
-        
-        # Load data from each subject
-        self.sequences = []
-        self.fc_matrices = []
-        self.metadata = []
-        
-        print("Loading timeseries and correlation matrices...")
-        for subject_folder, is_control in tqdm(subject_folders, desc="Loading subjects"):
-            try:
-                # Extract subject ID - extract numeric ID to match metadata CSV
-                import re
-                folder_name = subject_folder.name
-                # Extract numeric ID from folder name (e.g., "sub-control032057" -> "032057")
-                id_match = re.search(r'(\d+)', folder_name)
-                if id_match:
-                    subject_id = id_match.group(1)
-                else:
-                    # Fallback: remove 'sub-' prefix if present
-                    subject_id = folder_name.replace('sub-', '', 1)
-                
-                # Determine label - first try label_dict, then infer from folder name
-                if subject_id in label_dict:
-                    raw_label = label_dict[subject_id]
-                    # Convert text labels to numeric (Control=0, Patient/Disease=1)
-                    if isinstance(raw_label, str):
-                        label_lower = raw_label.lower().strip()
-                        if 'control' in label_lower or 'healthy' in label_lower or 'normal' in label_lower:
-                            label = 0.0
-                        elif 'pd' in label_lower or 'parkinson' in label_lower or 'patient' in label_lower or 'disease' in label_lower:
-                            label = 1.0  # PD, Patient, Disease
-                        else:
-                            label = 1.0  # Default to patient/disease for unknown labels
-                    else:
-                        label = float(raw_label) if raw_label is not None else (0.0 if is_control else 1.0)
-                else:
-                    # Fallback: use folder name to determine label (Control=0, Patient=1)
-                    label = 0.0 if is_control else 1.0
-                
-                # Load timeseries MAT file (note: typo in filename "timeseires")
-                ts_file = None
-                ts_patterns = [
-                    'AAL116_timeseires.mat',  # Original typo
-                    'AAL116_timeseries.mat',  # Corrected version
-                    '*timeseires*.mat',
-                    '*timeseries*.mat',
-                    '*.mat'
-                ]
-                
-                for pattern in ts_patterns:
-                    if ts_file is None:
-                        candidates = list(subject_folder.glob(pattern))
-                        # Filter out correlation files
-                        candidates = [f for f in candidates if 'correlation' not in f.name.lower()]
-                        if candidates:
-                            ts_file = candidates[0]
-                            break
-                
-                if ts_file is None:
-                    print(f"  ⚠️  No timeseries file in {subject_folder.name}, skipping...")
-                    continue
-                
-                # Load MAT file
-                mat_data = sio.loadmat(str(ts_file))
-                
-                # Find timeseries array
-                timeseries = None
-                for key in ['timeseries', 'BOLD', 'bold', 'data', 'ts', 'AAL116_timeseires', 'AAL116_timeseries']:
-                    if key in mat_data:
-                        timeseries = mat_data[key]
-                        break
-                
-                if timeseries is None:
-                    for key in mat_data.keys():
-                        if not key.startswith('__'):
-                            timeseries = mat_data[key]
-                            break
-                
-                if timeseries is None:
-                    print(f"  ⚠️  No timeseries array in {ts_file.name}, skipping...")
-                    continue
-                
-                # Ensure shape is [T, N_ROI]
-                timeseries = np.array(timeseries, dtype=np.float32)
-                if timeseries.shape[1] > timeseries.shape[0]:
-                    timeseries = timeseries.T
-                
-                # Load correlation matrix
-                fc_matrix = None
-                fc_patterns = [
-                    'AAL116_correlation_matrix.mat',
-                    '*correlation*.mat',
-                    'fc.mat',
-                    '*FC*.mat',
-                    '*connectivity*.mat',
-                    '*corr*.mat'
-                ]
-                
-                for pattern in fc_patterns:
-                    if fc_matrix is None:
-                        candidates = list(subject_folder.glob(pattern))
-                        if candidates:
-                            fc_file = candidates[0]
-                            try:
-                                fc_data = sio.loadmat(str(fc_file))
-                                for key in ['correlation_matrix', 'AAL116_correlation_matrix', 'fc', 'FC', 'connectivity', 'corr', 'R']:
-                                    if key in fc_data:
-                                        fc_matrix = np.array(fc_data[key], dtype=np.float32)
-                                        break
-                                if fc_matrix is None:
-                                    for key in fc_data.keys():
-                                        if not key.startswith('__'):
-                                            fc_matrix = np.array(fc_data[key], dtype=np.float32)
-                                            break
-                            except:
-                                pass
-                            break
-                
-                if fc_matrix is None:
-                    fc_matrix = np.eye(timeseries.shape[1], dtype=np.float32)
-                
-                # Create segments
-                segments = self._create_segments(timeseries)
-                
-                for segment in segments:
-                    self.sequences.append(segment)
-                    self.fc_matrices.append(fc_matrix)
-                    self.metadata.append({
-                        'subject': subject_id,
-                        'file': str(ts_file),
-                        'label': label,
-                        'labels': label
-                    })
-                    
-            except Exception as e:
-                print(f"  ✗ Error loading {subject_folder.name}: {e}")
-                continue
-        
-        if self.single_window_per_subject:
-            print(f"✓ Created {len(self.sequences)} sequence segments from {len(subject_folders)} subjects (single window per subject)")
-        else:
-            print(f"✓ Created {len(self.sequences)} sequence segments from {len(subject_folders)} subjects (sliding window)")
-        
-        # Check for consistent ROI counts
-        if len(self.sequences) > 0:
-            roi_counts = [seq.shape[1] for seq in self.sequences]
-            unique_roi_counts, counts = np.unique(roi_counts, return_counts=True)
-            if len(unique_roi_counts) > 1:
-                print(f"  ⚠️  Warning: Sequences have different ROI counts: {dict(zip(unique_roi_counts, counts))}")
-                # Filter to keep only sequences with the most common ROI count
-                most_common_roi = unique_roi_counts[np.argmax(counts)]
-                print(f"     Keeping sequences with {most_common_roi} ROIs (most common)")
-                filtered_sequences = []
-                filtered_fc = []
-                filtered_metadata = []
-                removed_count = 0
-                for seq, fc, meta in zip(self.sequences, self.fc_matrices, self.metadata):
-                    if seq.shape[1] == most_common_roi:
-                        filtered_sequences.append(seq)
-                        filtered_fc.append(fc)
-                        filtered_metadata.append(meta)
-                    else:
-                        removed_count += 1
-                self.sequences = filtered_sequences
-                self.fc_matrices = filtered_fc
-                self.metadata = filtered_metadata
-                if removed_count > 0:
-                    print(f"     Removed {removed_count} sequences with mismatched ROI counts")
-                self.normalize_per_sequence = False
-            else:
-                self.normalize_per_sequence = False
-        
-        # Normalize if requested
-        if self.normalize and len(self.sequences) > 0 and not self.normalize_per_sequence:
-            # All sequences have same ROI count, can concatenate
-            try:
-                all_data = np.concatenate(self.sequences, axis=0)
-                self.mean = np.mean(all_data, axis=0, keepdims=True)
-                self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
-            except ValueError as e:
-                print(f"  ⚠️  Warning: Could not concatenate sequences for normalization: {e}")
-                print(f"     Falling back to per-sequence normalization.")
-                self.mean = None
-                self.std = None
-                self.normalize_per_sequence = True
-        else:
-            self.mean = None
-            self.std = None
-            if not hasattr(self, 'normalize_per_sequence'):
-                self.normalize_per_sequence = False
-    
-    def _create_segments(self, data: np.ndarray):
-        """Create sliding window segments or single window per subject"""
-        segments = []
-        num_timepoints = data.shape[0]
-        
-        if self.single_window_per_subject:
-            # Single window mode: take only the first window
-            if num_timepoints < self.sequence_length:
-                # Pad if too short
-                pad_length = self.sequence_length - num_timepoints
-                padded = np.pad(data, ((0, pad_length), (0, 0)), mode='constant')
-                segments.append(padded)
-            else:
-                # Take first window
-                segments.append(data[:self.sequence_length])
-        else:
-            # Sliding window mode (default)
-            for start in range(0, num_timepoints - self.sequence_length + 1, self.stride):
-                end = start + self.sequence_length
-                segments.append(data[start:end])
-        
-        return segments
-    
-    def __len__(self):
-        return len(self.sequences)
-    
-    def __getitem__(self, idx):
-        seq = self.sequences[idx].copy()
-        fc = self.fc_matrices[idx]
-        meta = self.metadata[idx].copy()
-        
-        # Normalize if requested
-        if self.normalize:
-            if hasattr(self, 'normalize_per_sequence') and self.normalize_per_sequence:
-                # Per-sequence normalization (for variable ROI counts)
-                seq_mean = np.mean(seq, axis=0, keepdims=True)
-                seq_std = np.std(seq, axis=0, keepdims=True) + 1e-8
-                seq = (seq - seq_mean) / seq_std
-            elif self.mean is not None:
-                # Global normalization (all sequences have same ROI count)
-                seq = (seq - self.mean) / self.std
-        
-        # Convert to tensor
-        sequence = torch.from_numpy(seq.astype(np.float32))
-        
-        # Add FC matrix to metadata (matching PPMI format)
-        meta['fc_matrix'] = torch.from_numpy(fc.astype(np.float32))
-        
-        # Return tuple (sequence, metadata) to match extract_features expectations
-        return sequence, meta
-
-# Create NEUROCON dataset class (same structure as TAOWU)
-class NEUROCONDataset:
-    """
-    NEUROCON dataset loader for structure:
-    data/neurocon/sub-control(patient)xxxx/AAL116_timeseires.mat and AAL116_correlation_matrix.mat
-    data/neurocon/sub-patient(patient)xxxx/AAL116_timeseires.mat and AAL116_correlation_matrix.mat
-    """
-    def __init__(
-        self,
-        data_dir: str,
-        labels_file: str = None,
-        label_column: str = 'Group',  # Changed from 'diagnosis' to match metadata format (Subject,Group,Age,Sex)
-        sequence_length: int = 100,
-        stride: int = 50,
-        normalize: bool = True,
-        max_files: int = None,
-        single_window_per_subject: bool = False
-    ):
-        self.data_dir = Path(data_dir)
-        self.sequence_length = sequence_length
-        self.stride = stride
-        self.normalize = normalize
-        self.label_column = label_column
-        self.labels_file = labels_file
-        self.single_window_per_subject = single_window_per_subject
-        
-        # Find all subject folders matching pattern: sub-control(patient)xxxx or sub-patient(patient)xxxx
-        subject_folders = []
-        for item in self.data_dir.iterdir():
-            if item.is_dir():
-                name_lower = item.name.lower()
-                # Check for sub-control(patient) or sub-patient(patient) pattern
-                if 'sub-control' in name_lower or 'sub-patient' in name_lower:
-                    # Extract label from folder name
-                    is_control = 'control' in name_lower or 'sub-control' in name_lower
-                    subject_folders.append((item, is_control))
-        
-        if max_files:
-            subject_folders = subject_folders[:max_files]
-        
-        print(f"Found {len(subject_folders)} subject folders")
-        
-        # Load labels if provided
-        label_dict = {}
-        if self.labels_file and Path(self.labels_file).exists():
-            df = pd.read_csv(self.labels_file)
-            # Try multiple possible subject ID column names
-            subject_col = None
-            for col in ['Subject', 'subject', 'sub_id', 'subject_id', 'PATNO']:
-                if col in df.columns:
-                    subject_col = col
-                    break
-            if subject_col:
-                for _, row in df.iterrows():
-                    sub_id = str(row[subject_col]).strip()
-                    if sub_id:
-                        label_dict[sub_id] = row.get(self.label_column, None)
-                print(f"✓ Loaded labels for {len(label_dict)} subjects from {self.labels_file}")
-            else:
-                print(f"  ⚠️  Could not find subject column in labels file")
-        
-        # Load data from each subject
-        self.sequences = []
-        self.fc_matrices = []
-        self.metadata = []
-        
-        print("Loading timeseries and correlation matrices...")
-        for subject_folder, is_control in tqdm(subject_folders, desc="Loading subjects"):
-            try:
-                # Extract subject ID - extract numeric ID to match metadata CSV
-                import re
-                folder_name = subject_folder.name
-                # Extract numeric ID from folder name (e.g., "sub-control032057" -> "032057")
-                id_match = re.search(r'(\d+)', folder_name)
-                if id_match:
-                    subject_id = id_match.group(1)
-                else:
-                    # Fallback: remove 'sub-' prefix if present
-                    subject_id = folder_name.replace('sub-', '', 1)
-                
-                # Determine label - first try label_dict, then infer from folder name
-                if subject_id in label_dict:
-                    raw_label = label_dict[subject_id]
-                    # Convert text labels to numeric (Control=0, Patient/Disease=1)
-                    if isinstance(raw_label, str):
-                        label_lower = raw_label.lower().strip()
-                        if 'control' in label_lower or 'healthy' in label_lower or 'normal' in label_lower:
-                            label = 0.0
-                        elif 'pd' in label_lower or 'parkinson' in label_lower or 'patient' in label_lower or 'disease' in label_lower:
-                            label = 1.0  # PD, Patient, Disease
-                        else:
-                            label = 1.0  # Default to patient/disease for unknown labels
-                    else:
-                        label = float(raw_label) if raw_label is not None else (0.0 if is_control else 1.0)
-                else:
-                    # Fallback: use folder name to determine label (Control=0, Patient=1)
-                    label = 0.0 if is_control else 1.0
-                
-                # Load timeseries MAT file (note: typo in filename "timeseires")
-                ts_file = None
-                ts_patterns = [
-                    'AAL116_timeseires.mat',  # Original typo
-                    'AAL116_timeseries.mat',  # Corrected version
-                    '*timeseires*.mat',
-                    '*timeseries*.mat',
-                    '*.mat'
-                ]
-                
-                for pattern in ts_patterns:
-                    if ts_file is None:
-                        candidates = list(subject_folder.glob(pattern))
-                        # Filter out correlation files
-                        candidates = [f for f in candidates if 'correlation' not in f.name.lower()]
-                        if candidates:
-                            ts_file = candidates[0]
-                            break
-                
-                if ts_file is None:
-                    print(f"  ⚠️  No timeseries file in {subject_folder.name}, skipping...")
-                    continue
-                
-                # Load MAT file
-                mat_data = sio.loadmat(str(ts_file))
-                
-                # Find timeseries array
-                timeseries = None
-                for key in ['timeseries', 'BOLD', 'bold', 'data', 'ts', 'AAL116_timeseires', 'AAL116_timeseries']:
-                    if key in mat_data:
-                        timeseries = mat_data[key]
-                        break
-                
-                if timeseries is None:
-                    for key in mat_data.keys():
-                        if not key.startswith('__'):
-                            timeseries = mat_data[key]
-                            break
-                
-                if timeseries is None:
-                    print(f"  ⚠️  No timeseries array in {ts_file.name}, skipping...")
-                    continue
-                
-                # Ensure shape is [T, N_ROI]
-                timeseries = np.array(timeseries, dtype=np.float32)
-                if timeseries.shape[1] > timeseries.shape[0]:
-                    timeseries = timeseries.T
-                
-                # Load correlation matrix
-                fc_matrix = None
-                fc_patterns = [
-                    'AAL116_correlation_matrix.mat',
-                    '*correlation*.mat',
-                    'fc.mat',
-                    '*FC*.mat',
-                    '*connectivity*.mat',
-                    '*corr*.mat'
-                ]
-                
-                for pattern in fc_patterns:
-                    if fc_matrix is None:
-                        candidates = list(subject_folder.glob(pattern))
-                        if candidates:
-                            fc_file = candidates[0]
-                            try:
-                                fc_data = sio.loadmat(str(fc_file))
-                                for key in ['correlation_matrix', 'AAL116_correlation_matrix', 'fc', 'FC', 'connectivity', 'corr', 'R']:
-                                    if key in fc_data:
-                                        fc_matrix = np.array(fc_data[key], dtype=np.float32)
-                                        break
-                                if fc_matrix is None:
-                                    for key in fc_data.keys():
-                                        if not key.startswith('__'):
-                                            fc_matrix = np.array(fc_data[key], dtype=np.float32)
-                                            break
-                            except:
-                                pass
-                            break
-                
-                if fc_matrix is None:
-                    fc_matrix = np.eye(timeseries.shape[1], dtype=np.float32)
-                
-                # Create segments
-                segments = self._create_segments(timeseries)
-                
-                for segment in segments:
-                    self.sequences.append(segment)
-                    self.fc_matrices.append(fc_matrix)
-                    self.metadata.append({
-                        'subject': subject_id,
-                        'file': str(ts_file),
-                        'label': label,
-                        'labels': label
-                    })
-                    
-            except Exception as e:
-                print(f"  ✗ Error loading {subject_folder.name}: {e}")
-                continue
-        
-        if self.single_window_per_subject:
-            print(f"✓ Created {len(self.sequences)} sequence segments from {len(subject_folders)} subjects (single window per subject)")
-        else:
-            print(f"✓ Created {len(self.sequences)} sequence segments from {len(subject_folders)} subjects (sliding window)")
-        
-        # Check for consistent ROI counts
-        if len(self.sequences) > 0:
-            roi_counts = [seq.shape[1] for seq in self.sequences]
-            unique_roi_counts, counts = np.unique(roi_counts, return_counts=True)
-            if len(unique_roi_counts) > 1:
-                print(f"  ⚠️  Warning: Sequences have different ROI counts: {dict(zip(unique_roi_counts, counts))}")
-                # Filter to keep only sequences with the most common ROI count
-                most_common_roi = unique_roi_counts[np.argmax(counts)]
-                print(f"     Keeping sequences with {most_common_roi} ROIs (most common)")
-                filtered_sequences = []
-                filtered_fc = []
-                filtered_metadata = []
-                removed_count = 0
-                for seq, fc, meta in zip(self.sequences, self.fc_matrices, self.metadata):
-                    if seq.shape[1] == most_common_roi:
-                        filtered_sequences.append(seq)
-                        filtered_fc.append(fc)
-                        filtered_metadata.append(meta)
-                    else:
-                        removed_count += 1
-                self.sequences = filtered_sequences
-                self.fc_matrices = filtered_fc
-                self.metadata = filtered_metadata
-                if removed_count > 0:
-                    print(f"     Removed {removed_count} sequences with mismatched ROI counts")
-                self.normalize_per_sequence = False
-            else:
-                self.normalize_per_sequence = False
-        
-        # Normalize if requested
-        if self.normalize and len(self.sequences) > 0 and not self.normalize_per_sequence:
-            # All sequences have same ROI count, can concatenate
-            try:
-                all_data = np.concatenate(self.sequences, axis=0)
-                self.mean = np.mean(all_data, axis=0, keepdims=True)
-                self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
-            except ValueError as e:
-                print(f"  ⚠️  Warning: Could not concatenate sequences for normalization: {e}")
-                print(f"     Falling back to per-sequence normalization.")
-                self.mean = None
-                self.std = None
-                self.normalize_per_sequence = True
-        else:
-            self.mean = None
-            self.std = None
-            if not hasattr(self, 'normalize_per_sequence'):
-                self.normalize_per_sequence = False
-    
-    def _create_segments(self, data: np.ndarray):
-        """Create sliding window segments or single window per subject"""
-        segments = []
-        num_timepoints = data.shape[0]
-        
-        if self.single_window_per_subject:
-            # Single window mode: take only the first window
-            if num_timepoints < self.sequence_length:
-                # Pad if too short
-                pad_length = self.sequence_length - num_timepoints
-                padded = np.pad(data, ((0, pad_length), (0, 0)), mode='constant')
-                segments.append(padded)
-            else:
-                # Take first window
-                segments.append(data[:self.sequence_length])
-        else:
-            # Sliding window mode (default)
-            for start in range(0, num_timepoints - self.sequence_length + 1, self.stride):
-                end = start + self.sequence_length
-                segments.append(data[start:end])
-        
-        return segments
-    
-    def __len__(self):
-        return len(self.sequences)
-    
-    def __getitem__(self, idx):
-        seq = self.sequences[idx].copy()
-        fc = self.fc_matrices[idx]
-        meta = self.metadata[idx].copy()
-        
-        # Normalize if requested
-        if self.normalize:
-            if hasattr(self, 'normalize_per_sequence') and self.normalize_per_sequence:
-                # Per-sequence normalization (for variable ROI counts)
-                seq_mean = np.mean(seq, axis=0, keepdims=True)
-                seq_std = np.std(seq, axis=0, keepdims=True) + 1e-8
-                seq = (seq - seq_mean) / seq_std
-            elif self.mean is not None:
-                # Global normalization (all sequences have same ROI count)
-                seq = (seq - self.mean) / self.std
-        
-        # Convert to tensor
-        sequence = torch.from_numpy(seq.astype(np.float32))
-        
-        # Add FC matrix to metadata (matching PPMI format)
-        meta['fc_matrix'] = torch.from_numpy(fc.astype(np.float32))
-        
-        # Return tuple (sequence, metadata) to match extract_features expectations
-        return sequence, meta
-
-# Add TAOWU and NEUROCON to registry
-DATASET_REGISTRY['TAOWU'] = TAOWUDataset
-DATASET_REGISTRY['NEUROCON'] = NEUROCONDataset
 
 
 # Create ADNI dataset class
@@ -3261,7 +2643,7 @@ def main():
     
     # Feature extraction
     parser.add_argument('--feature_type', type=str, default='z_concat',
-                       choices=['z_mean', 'z_std', 'z_concat', 'z_all', 'cognitive'],
+                       choices=['z_mean', 'z_std', 'z_concat', 'z_all'],
                        help='Type of features to extract')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size for feature extraction')
@@ -3283,7 +2665,7 @@ def main():
     parser.add_argument('--per_subject_eval', action='store_true',
                        help='Aggregate predictions per subject before computing metrics (one prediction per subject)')
     parser.add_argument('--fc_mode', type=str, default='dynamic', choices=['static', 'dynamic', 'hybrid'],
-                       help='FC computation mode: static (one FC per subject), dynamic (FC per window), hybrid (weighted combination). Note: Custom datasets (PPMI, TAOWU, etc.) load pre-computed FC from files, so this may not apply.')
+                       help='FC computation mode: static (one FC per subject), dynamic (FC per window), hybrid (weighted combination). Note: Custom datasets (PPMI, etc.) load pre-computed FC from files, so this may not apply.')
     parser.add_argument('--hybrid_weight', type=float, default=0.3,
                        help='Weight for dynamic FC in hybrid mode (0.0 = fully static, 1.0 = fully dynamic)')
     parser.add_argument('--mlp_hidden_dims', type=int, nargs='+', default=[256, 128],
@@ -3301,7 +2683,7 @@ def main():
     parser.add_argument('--mlp_patience', type=int, default=15,
                        help='Early stopping patience for Frozen MLP head (default: 15 to prevent overfitting)')
     parser.add_argument('--mlp_use_robust_norm', action='store_true', default=True,
-                       help='Use robust normalization (RobustScaler with median/IQR) for MLP head (default: True, matches paper methodology)')
+                       help='Use robust normalization (RobustScaler with median/IQR) for MLP head (default: True)')
     parser.add_argument('--mlp_use_standard_norm', action='store_true', default=False,
                        help='Use standard normalization (StandardScaler with mean/std) instead of robust normalization')
     
@@ -3337,14 +2719,6 @@ def main():
         },
         'MATAI': {
             'data_dir': '../data/matai',
-            'labels_file': None,  # Optional - can auto-extract from folder names
-        },
-        'NEUROCON': {
-            'data_dir': '../data/neurocon',
-            'labels_file': None,  # Optional - can auto-extract from folder names
-        },
-        'TAOWU': {
-            'data_dir': '../data/taowu',
             'labels_file': None,  # Optional - can auto-extract from folder names
         }
     }
@@ -3421,7 +2795,7 @@ def main():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    # Determine normalization type (robust by default to match paper)
+    # Determine normalization type (robust by default)
     use_robust_norm = args.mlp_use_robust_norm and not args.mlp_use_standard_norm
     
     mlp_params = {
@@ -3433,7 +2807,7 @@ def main():
         'epochs': args.mlp_epochs,
         'patience': args.mlp_patience,
         'device': device,
-        'use_robust_norm': use_robust_norm,  # Robust normalization (median/IQR) as per paper
+        'use_robust_norm': use_robust_norm,  # Robust normalization (median/IQR)
     }
     
     # Load model
@@ -3444,7 +2818,7 @@ def main():
     # Indicate evaluation method
     if 'FrozenMLP' in args.classifiers:
         print("\n✓ Using fine-tuning method (Frozen MLP head with frozen backbone)")
-        print("  Methodology matches paper:")
+        print("  Methodology:")
         print("    - Freeze pretrained backbone, train only MLP head")
         print("    - MLP: Linear → LayerNorm → GELU → Dropout (p=0.1) → ... → Linear")
         print("    - Loss: MSE for regression, CrossEntropy for classification")
@@ -3512,51 +2886,7 @@ def main():
                 print("  (sub-control* = Control, sub-patient* = ASD)")
             elif dataset_name == 'PPMI':
                 print("  (2-class: sub-control* = Control (0), sub-patient*/sub-prodromal*/sub-swedd* = Patient (1))")
-            elif dataset_name == 'TAOWU':
-                print("  (sub-control(patient)xxxx = Control, sub-patient(patient)xxxx = Patient)")
-            elif dataset_name == 'NEUROCON':
-                print("  (sub-control(patient)xxxx = Control, sub-patient(patient)xxxx = Patient)")
             labels_file = None  # Ensure it's None for auto-extraction
-        
-        # For TAOWU and NEUROCON, verify folder structure exists
-        if dataset_name in ['TAOWU', 'NEUROCON']:
-            data_path = Path(data_dir)
-            # Check for sub-control(patient)xxxx or sub-patient(patient)xxxx folders
-            subject_folders = []
-            for item in data_path.iterdir():
-                if item.is_dir():
-                    name_lower = item.name.lower()
-                    if 'sub-control' in name_lower or 'sub-patient' in name_lower:
-                        subject_folders.append(item)
-            
-            if len(subject_folders) == 0:
-                print(f"\n✗ Error: No subject folders found in {data_dir}")
-                print(f"  {dataset_name} expects structure:")
-                print(f"    {data_dir}/")
-                print(f"    ├── sub-control(patient)xxxx/")
-                print(f"    │   ├── AAL116_timeseires.mat")
-                print(f"    │   └── AAL116_correlation_matrix.mat")
-                print(f"    ├── sub-patient(patient)xxxx/")
-                print(f"    │   ├── AAL116_timeseires.mat")
-                print(f"    │   └── AAL116_correlation_matrix.mat")
-                print(f"    └── ...")
-                print(f"  Skipping {dataset_name}...")
-                continue
-            else:
-                # Check if required files exist in at least one folder
-                found_files = 0
-                for sub_folder in subject_folders[:5]:  # Check first 5
-                    ts_files = list(sub_folder.glob('AAL116_timeseires*.mat')) + list(sub_folder.glob('AAL116_timeseries*.mat'))
-                    corr_files = list(sub_folder.glob('AAL116_correlation*.mat'))
-                    if ts_files and corr_files:
-                        found_files += 1
-                
-                if found_files == 0:
-                    print(f"⚠️  Warning: No AAL116_timeseires.mat or AAL116_correlation_matrix.mat found in sample folders")
-                    print(f"  Will try to load with flexible pattern matching...")
-                else:
-                    print(f"✓ Found {len(subject_folders)} subject folders")
-                    print(f"  Sample folders contain required files: {found_files}/{min(5, len(subject_folders))}")
         
         # For PPMI, verify nested folder structure exists (legacy layout only).
         # Skip this check for SC-FC CSV layouts (PPMI-SC-FC/...), which use a different loader.

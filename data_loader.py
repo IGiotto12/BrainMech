@@ -1,5 +1,5 @@
 """
-Data loader for HCPA fMRI BOLD time series data
+Data loader for fMRI BOLD time series data
 """
 
 import os
@@ -59,7 +59,7 @@ def _cache_only_enabled() -> bool:
     return os.environ.get("CACHE_ONLY", "").strip().lower() in {"1", "true", "yes", "y"}
 
 
-def _save_to_cache(cache_path: Path, sequences: List, fc_matrices: Optional[List], 
+def _save_to_cache(cache_path: Path, sequences: List, fc_matrices: Optional[List],
                    metadata: List, mean: Optional[np.ndarray], std: Optional[np.ndarray]):
     """Save processed data to cache"""
     try:
@@ -74,6 +74,23 @@ def _save_to_cache(cache_path: Path, sequences: List, fc_matrices: Optional[List
             }, f)
     except Exception as e:
         print(f"⚠️  Warning: Failed to save cache: {e}")
+
+
+def _compute_stats_from_seqs(sequences: List[np.ndarray],
+                             indices: Optional[List[int]] = None
+                             ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Compute (mean, std) over a list of [T, ROI] segments.
+
+    If `indices` is provided, only those segments contribute. Returns
+    (None, None) when there is nothing to aggregate.
+    """
+    seqs = sequences if indices is None else [sequences[i] for i in indices]
+    if not seqs:
+        return None, None
+    all_data = np.concatenate(seqs, axis=0)
+    mean = np.mean(all_data, axis=0, keepdims=True)
+    std = np.std(all_data, axis=0, keepdims=True) + 1e-8
+    return mean, std
 
 
 class HCPABOLDWithFCDataset(Dataset):
@@ -189,12 +206,9 @@ class HCPABOLDWithFCDataset(Dataset):
                 f"Check that task_filter matches tasks in the dataset. "
                 f"Available tasks: {np.unique(data['task']) if 'task' in data else 'unknown'}"
             )
-        
-        # Compute global statistics for normalization
-        if self.normalize:
-            all_data = np.concatenate(self.sequences, axis=0)
-            self.mean = np.mean(all_data, axis=0, keepdims=True)
-            self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
+
+        self.mean = None
+        self.std = None
     
     def _create_segments(self, data: np.ndarray) -> List[np.ndarray]:
         """Create sliding window segments from time series"""
@@ -207,6 +221,15 @@ class HCPABOLDWithFCDataset(Dataset):
         
         return segments
     
+    def compute_normalization_stats(self, indices: Optional[List[int]] = None) -> None:
+        """Compute and store mean/std over `self.sequences`.
+
+        With no indices, all segments are used.
+        """
+        if not self.normalize:
+            return
+        self.mean, self.std = _compute_stats_from_seqs(self.sequences, indices)
+
     def __len__(self) -> int:
         return len(self.sequences)
     
@@ -219,7 +242,7 @@ class HCPABOLDWithFCDataset(Dataset):
         sequence = self.sequences[idx].copy()
         
         # Normalize
-        if self.normalize:
+        if self.normalize and self.mean is not None and self.std is not None:
             sequence = (sequence - self.mean) / self.std
         
         # Convert to tensor [T, N_ROI] - ensure float32 (not float64)
@@ -270,8 +293,8 @@ class HCPABOLDDataset(Dataset):
             print(f"✓ Loading from cache: {cache_path}")
             self.sequences = cached_data['sequences']
             self.metadata = cached_data['metadata']
-            self.mean = cached_data.get('mean')
-            self.std = cached_data.get('std')
+            self.mean = None
+            self.std = None
             # Ensure metadata has task field (older caches may not)
             for meta in self.metadata:
                 if 'task' not in meta:
@@ -348,18 +371,12 @@ class HCPABOLDDataset(Dataset):
                 f"  4. Directory path: Verify the data directory is correct"
             )
         
-        # Compute global statistics for normalization
-        if self.normalize:
-            all_data = np.concatenate(self.sequences, axis=0)
-            self.mean = np.mean(all_data, axis=0, keepdims=True)
-            self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
-        else:
-            self.mean = None
-            self.std = None
-        
+        self.mean = None
+        self.std = None
+
         # Save to cache
         print(f"💾 Saving to cache: {cache_path}")
-        _save_to_cache(cache_path, self.sequences, None, self.metadata, self.mean, self.std)
+        _save_to_cache(cache_path, self.sequences, None, self.metadata, None, None)
     
     def _load_csv(self, csv_file: str) -> np.ndarray:
         """Load a single CSV or TSV file and return as numpy array"""
@@ -394,6 +411,15 @@ class HCPABOLDDataset(Dataset):
                 return part.replace('task-', '')
         return 'unknown'
     
+    def compute_normalization_stats(self, indices: Optional[List[int]] = None) -> None:
+        """Compute and store mean/std over `self.sequences`.
+
+        With no indices, all segments are used.
+        """
+        if not self.normalize:
+            return
+        self.mean, self.std = _compute_stats_from_seqs(self.sequences, indices)
+
     def __len__(self) -> int:
         return len(self.sequences)
     
@@ -406,7 +432,7 @@ class HCPABOLDDataset(Dataset):
         sequence = self.sequences[idx].copy()
         
         # Normalize
-        if self.normalize:
+        if self.normalize and self.mean is not None and self.std is not None:
             sequence = (sequence - self.mean) / self.std
         
         # Convert to tensor [T, N_ROI] - ensure float32 (not float64)
@@ -537,8 +563,8 @@ class UKBiobankBOLDWithFCDataset(Dataset):
             self.sequences = cached_data['sequences']
             self.fc_matrices = cached_data.get('fc_matrices', [])
             self.metadata = cached_data['metadata']
-            self.mean = cached_data.get('mean')
-            self.std = cached_data.get('std')
+            self.mean = None
+            self.std = None
             # Ensure metadata has correct dataset type
             for meta in self.metadata:
                 if 'dataset' not in meta:
@@ -727,18 +753,12 @@ class UKBiobankBOLDWithFCDataset(Dataset):
         if n_fc_loaded > 0:
             print(f"  ℹ️  Loaded pre-computed FC for {n_fc_loaded} subjects")
         
-        # Compute global statistics for normalization
-        if self.normalize:
-            all_data = np.concatenate(self.sequences, axis=0)
-            self.mean = np.mean(all_data, axis=0, keepdims=True)
-            self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
-        else:
-            self.mean = None
-            self.std = None
-        
+        self.mean = None
+        self.std = None
+
         # Save to cache
         print(f"💾 Saving to cache: {cache_path}")
-        _save_to_cache(cache_path, self.sequences, self.fc_matrices, self.metadata, self.mean, self.std)
+        _save_to_cache(cache_path, self.sequences, self.fc_matrices, self.metadata, None, None)
     
     def _load_csv(self, csv_file: str) -> np.ndarray:
         """Load a single CSV or TSV file and return as numpy array"""
@@ -817,6 +837,15 @@ class UKBiobankBOLDWithFCDataset(Dataset):
         # Fallback: return first part before underscore (for HCPA format: subject_001)
         return basename_no_ext.split('_')[0]
     
+    def compute_normalization_stats(self, indices: Optional[List[int]] = None) -> None:
+        """Compute and store mean/std over `self.sequences`.
+
+        With no indices, all segments are used.
+        """
+        if not self.normalize:
+            return
+        self.mean, self.std = _compute_stats_from_seqs(self.sequences, indices)
+
     def __len__(self) -> int:
         return len(self.sequences)
     
@@ -829,7 +858,7 @@ class UKBiobankBOLDWithFCDataset(Dataset):
         sequence = self.sequences[idx].copy()
         
         # Normalize
-        if self.normalize:
+        if self.normalize and self.mean is not None and self.std is not None:
             sequence = (sequence - self.mean) / self.std
         
         # Convert to tensor [T, N_ROI] - ensure float32
@@ -910,8 +939,8 @@ class ABCDBOLDWithFCDataset(UKBiobankBOLDWithFCDataset):
             self.sequences = cached_data['sequences']
             self.fc_matrices = cached_data.get('fc_matrices', [])
             self.metadata = cached_data['metadata']
-            self.mean = cached_data.get('mean')
-            self.std = cached_data.get('std')
+            self.mean = None
+            self.std = None
             # Update metadata to mark as ABCD dataset
             for meta in self.metadata:
                 meta['dataset'] = 'ABCD'
@@ -1099,16 +1128,28 @@ def get_dataloaders(
     else:
         raise ValueError("Either data_dir or npz_path must be provided")
     
-    # Split into train and val
-    n_train = int(len(dataset) * train_split)
-    n_val = len(dataset) - n_train
-    
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        dataset, 
-        [n_train, n_val],
-        generator=torch.Generator().manual_seed(42)
-    )
-    
+    # Split by subject — every segment from a given subject stays in one fold.
+    subjects = [m['subject'] for m in dataset.metadata]
+    unique_subjects = sorted(set(subjects))
+    rng = np.random.default_rng(42)
+    shuffled_subjects = list(unique_subjects)
+    rng.shuffle(shuffled_subjects)
+    n_train_subj = int(len(shuffled_subjects) * train_split)
+    train_subjects = set(shuffled_subjects[:n_train_subj])
+
+    train_indices = [i for i, s in enumerate(subjects) if s in train_subjects]
+    val_indices = [i for i, s in enumerate(subjects) if s not in train_subjects]
+
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
+
+    print(f"Subject split: {len(train_subjects)} train / "
+          f"{len(unique_subjects) - len(train_subjects)} val "
+          f"({len(train_indices)} / {len(val_indices)} segments)")
+
+    if hasattr(dataset, 'compute_normalization_stats'):
+        dataset.compute_normalization_stats(train_indices)
+
     # Create distributed samplers if needed
     train_sampler = None
     val_sampler = None
@@ -1162,7 +1203,8 @@ if __name__ == "__main__":
         task_filter=['REST'],
         max_files=5
     )
-    
+    dataset.compute_normalization_stats()
+
     print(f"\nDataset size: {len(dataset)}")
     
     # Test a single sample

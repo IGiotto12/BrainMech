@@ -34,6 +34,10 @@ BrainMech models functional brain dynamics in a stochastic Koopman latent space,
 BrainMech/
 ├── README.md
 ├── requirements.txt
+├── data_loader.py
+├── configs/
+│   ├── __init__.py
+│   └── pretrain_configs.py
 ├── eval/
 │   ├── age_sex.py
 │   ├── disease_diagnosis.py
@@ -43,39 +47,48 @@ BrainMech/
 ├── models/
 │   ├── __init__.py
 │   ├── brainmech.py
-│   ├── cognitive_readout.py
 │   ├── control_fusion.py
 │   ├── decoder_stochastic.py
 │   ├── episodic_feedback.py
-│   ├── graph_spatial_encoder_real.py
-│   ├── koopman_brain_model_v2.py
+│   ├── graph_spatial_encoder.py
 │   ├── koopman_core_structured.py
 │   ├── masked_pretraining.py
 │   ├── module_probes.py
 │   ├── regularizers.py
 │   ├── task_context_encoder.py
 │   └── temporal_transformer.py
-├── training/
-│   ├── train_with_mae.py
-│   └── training_utils.py
-└── utils/
-    └── data_loader.py
+└── training/
+    ├── pretrain.py
+    └── training_utils.py
 ```
 
 ## Usage Instructions
 
 ## 1. Pretraining (Self-Supervised)
-Train BrainMech with masked reconstruction and stochastic Koopman dynamics:
+Train BrainMech with stability-regularized Koopman dynamics. The objective is
+
+$$\mathcal{L} = \mathcal{L}_{\mathrm{pre}} + \lambda_1\,\mathcal{L}_{\mathrm{dyn}} + \lambda_2\,\mathcal{L}_{\mathrm{stab}}$$
+
+(one-step forecasting NLL + Koopman-step latent consistency MSE + spectral-radius hinge with $\rho=0.95$).
+
+The recommended entry point is the bundled config, which fixes the dataset pool
+(HCPA + UKB + ABCD, resting-state, AAL-116), sequence length, hyperparameters,
+and loss weights:
 
 ```bash
-python training/train_with_mae.py \
-  --data_dir \dataset_dir\ \
-  --task_filter CARIT \
-  --batch_size 1 \
-  --epochs 1 \
-  --max_files 2 \
-  --num_workers 0 \
-  --use_sde
+python training/pretrain.py --config default
+```
+
+Any field can be overridden by passing the corresponding flag on the command line:
+
+```bash
+python training/pretrain.py --config default --batch_size 8 --epochs 50
+```
+
+Listing the registered configs:
+
+```bash
+python -c "from configs.pretrain_configs import list_configs; print(list_configs())"
 ```
 
 ## 2. Sex Classification
@@ -110,10 +123,14 @@ python eval/evaluate_downstream.py \
 ```
 
 ## Configuration
-Hyperparameters are set via command line arguments in `training/train_with_mae.py`. Key options:
+The recommended workflow is to start from a config in `configs/pretrain_configs.py`
+and override only what differs (`--config default --<flag> <value>`). Key options
+exposed on the CLI:
 
 - `--koopman_rank`: DPLR rank $r$.
 - `--latent_dim`: Latent dimension $d$.
 - `--use_sde`: Enable stochastic diffusion.
 - `--graph_type`: `cheb` or `gat` for TASEN spatial encoder.
 - `--sequence_length`: BOLD segment length $T$.
+- `--use_age_context` / `--age_min` / `--age_max`: enable age-conditioned context.
+- `--forecast_weight` / `--consistency_weight` / `--spectral_weight`: tune the three loss terms.

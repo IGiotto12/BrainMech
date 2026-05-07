@@ -3,7 +3,7 @@ BrainMech foundation model components
 """
 
 # V2 Core Components
-from .graph_spatial_encoder_real import GraphSpatialEncoderReal, ChebConv, GraphAttentionLayer
+from .graph_spatial_encoder import GraphSpatialEncoderReal, ChebConv, GraphAttentionLayer
 from .temporal_transformer import TemporalTransformer, PositionalEncoding
 from .episodic_feedback import EpisodicFeedbackTransformer
 from .task_context_encoder import TaskContextEncoder

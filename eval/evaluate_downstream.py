@@ -534,35 +534,13 @@ class BaseDownstreamDataset(Dataset):
 
 
 
-        # Normalize if requested
+        # Per-sequence (within-subject) z-normalization is applied in __getitem__
+        # when self.mean is None — avoids any cross-subject leakage.
+        self.mean = None
 
 
 
-        if self.normalize and len(self.sequences) > 0:
-
-
-
-            all_data = np.concatenate(self.sequences, axis=0)
-
-
-
-            self.mean = np.mean(all_data, axis=0, keepdims=True)
-
-
-
-            self.std = np.std(all_data, axis=0, keepdims=True) + 1e-8
-
-
-
-        else:
-
-
-
-            self.mean = None
-
-
-
-            self.std = None
+        self.std = None
 
 
 
@@ -646,11 +624,26 @@ class BaseDownstreamDataset(Dataset):
 
 
 
-        if self.normalize and self.mean is not None:
+        if self.normalize:
 
 
 
-            sequence = (sequence - self.mean) / self.std
+            if self.mean is not None:
+
+
+
+                sequence = (sequence - self.mean) / self.std
+
+
+
+            else:
+
+
+
+                # Per-sequence (within-subject) z-normalization — leakage-free fallback
+                seq_mean = np.mean(sequence, axis=0, keepdims=True)
+                seq_std = np.std(sequence, axis=0, keepdims=True) + 1e-8
+                sequence = (sequence - seq_mean) / seq_std
 
 
 
@@ -3014,7 +3007,7 @@ def extract_features(
 
 
 
-        feature_type: Type of features ('z_mean', 'z_std', 'z_concat', 'cognitive')
+        feature_type: Type of features ('z_mean', 'z_std', 'z_concat')
 
 
 
@@ -3311,10 +3304,6 @@ def extract_features(
                         z_std = z[b].std(dim=0).cpu().numpy()
 
                         feat = np.concatenate([z_mean, z_std])
-
-                    elif feature_type == 'cognitive':
-
-                        feat = outputs['cognitive_predictions'][b].cpu().numpy()
 
                     else:
 
@@ -4528,7 +4517,7 @@ Examples:
 
 
 
-                        choices=['z_mean', 'z_std', 'z_concat', 'cognitive'],
+                        choices=['z_mean', 'z_std', 'z_concat'],
 
 
 

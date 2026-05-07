@@ -34,7 +34,7 @@ class MaskedAutoencoderWrapper(nn.Module):
     ):
         """
         Args:
-            base_model: KoopmanBrainModel to wrap
+            base_model: BrainMech to wrap
             mask_ratio: Fixed ratio of input to mask (0.0-1.0) - used if use_random_masking=False
             mask_strategy: 'random', 'block', or 'structured'
             mask_type: 'spatial' (mask ROIs), 'temporal' (mask timepoints), or 'both' (mask both)
@@ -480,10 +480,10 @@ class MaskedAutoencoderWrapper(nn.Module):
 
 
 if __name__ == "__main__":
-    from koopman_brain_model_v2 import KoopmanBrainModel
-    
+    from brainmech import BrainMech
+
     # Create base model
-    base_model = KoopmanBrainModel(n_roi=116, d_latent=128)
+    base_model = BrainMech(n_roi=116, d_latent=128)
     
     # Wrap with MAE
     mae_model = MaskedAutoencoderWrapper(

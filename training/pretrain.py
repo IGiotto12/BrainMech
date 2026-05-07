@@ -69,7 +69,7 @@ except ImportError:
 # Import disease evaluation
 try:
     from eval.run_all_evaluations import run_disease_evaluation
-    DISEASE_DATASETS = ['ABIDE', 'ADNI', 'PPMI', 'NEUROCON', 'TAOWU']
+    DISEASE_DATASETS = ['ABIDE', 'ADNI', 'PPMI']
 except ImportError:
     run_disease_evaluation = None
     DISEASE_DATASETS = []
@@ -598,7 +598,7 @@ def train_epoch(
                     return_uncertainty=True, 
                     return_intermediates=need_intermediates
                 )
-                losses = model.module.base_model.compute_losses(outputs, x, cognitive_target=None, loss_weights=loss_weights)
+                losses = model.module.base_model.compute_losses(outputs, x, loss_weights=loss_weights)
                 
                 # Shape debug: print intermediate shapes once (non-MAE mode)
                 if should_print_shape_debug and 'intermediates' in outputs:
@@ -628,7 +628,7 @@ def train_epoch(
                     return_uncertainty=True,
                     return_intermediates=need_intermediates
                 )
-                losses = model.base_model.compute_losses(outputs, x, cognitive_target=None, loss_weights=loss_weights)
+                losses = model.base_model.compute_losses(outputs, x, loss_weights=loss_weights)
                 
                 # Shape debug: print intermediate shapes once (non-MAE mode)
                 if should_print_shape_debug and 'intermediates' in outputs:
@@ -972,13 +972,13 @@ def validate_epoch(model, val_loader, device, loss_weights, rollout_horizon=8, u
                         x, task_vectors=task_vectors, fc_matrix=fc_matrix,
                         return_uncertainty=True, return_intermediates=enable_module_probes
                     )
-                    losses = model.module.base_model.compute_losses(outputs, x, cognitive_target=None, loss_weights=loss_weights)
+                    losses = model.module.base_model.compute_losses(outputs, x, loss_weights=loss_weights)
                 else:
                     outputs = model.base_model(
                         x, task_vectors=task_vectors, fc_matrix=fc_matrix,
                         return_uncertainty=True, return_intermediates=enable_module_probes
                     )
-                    losses = model.base_model.compute_losses(outputs, x, cognitive_target=None, loss_weights=loss_weights)
+                    losses = model.base_model.compute_losses(outputs, x, loss_weights=loss_weights)
             
             # === Module probe losses (if enabled) ===
             if enable_module_probes and probe_heads is not None and 'intermediates' in outputs:
@@ -1373,7 +1373,7 @@ def train(args):
                 print("❌ Error: Either --data_dir or --npz_path must be provided")
                 print("   You can also use --config <config_name> to load a predefined configuration")
                 print("   Available configs: small_model, large_model, sota_latent256, hcpa, ukb, etc.")
-                print("   Example: python training/train_with_mae.py --config sota_latent256 --enable_module_probes")
+                print("   Example: python training/pretrain.py --config sota_latent256 --enable_module_probes")
                 cleanup_distributed()
                 return
         
@@ -2061,7 +2061,6 @@ def train(args):
         use_task_context=args.use_task_context,
         use_control_fusion=args.use_control_fusion,
         use_temporal_transformer=args.use_temporal_transformer,
-        use_cognitive_readout=args.use_cognitive_readout,
         use_spatial_encoder=args.use_spatial_encoder,
         # Mamba architecture flags
         temporal_model=args.temporal_model,
@@ -2310,21 +2309,9 @@ def train(args):
         print(f"   Sigma Calibration: {args.sigma_calibration}")
         print(f"   Detach Sigma Head: {args.detach_sigma_head}")
         
-        # 6. Cognitive Readout
-        print(f"\n6. Cognitive Readout")
-        if args.use_cognitive_readout:
-            print(f"   Status: ✓ ENABLED")
-            print(f"   Type: CognitiveStateReadoutStochastic")
-            task_type = getattr(args, 'task_type', 'classification')  # Default to classification
-            print(f"   Task Type: {task_type}")
-            print(f"   Classes: {args.n_classes}")
-            print(f"   MC Samples: 10 (for uncertainty)")
-        else:
-            print(f"   Status: ✗ DISABLED")
-        
-        # 7. MAE Wrapper (if enabled)
+        # 6. MAE Wrapper (if enabled)
         if args.use_mae:
-            print(f"\n7. MAE Pre-training Wrapper")
+            print(f"\n6. MAE Pre-training Wrapper")
             print(f"   Status: ✓ ENABLED")
             print(f"   Type: MaskedAutoencoderWrapper")
             print(f"   Mask Strategy: {args.mask_strategy}")
@@ -2343,8 +2330,8 @@ def train(args):
                 if args.temporal_mask_ratio is not None:
                     print(f"   Temporal Mask Ratio: {args.temporal_mask_ratio}")
         
-        # 8. Regularizers
-        print(f"\n8. Regularizers")
+        # 7. Regularizers
+        print(f"\n7. Regularizers")
         print(f"   8.1 Spectral Regularizer")
         print(f"      Status: ✓ ENABLED")
         print(f"      Target Spectral Radius: {args.target_spectral_radius}")
@@ -2357,9 +2344,7 @@ def train(args):
         
         # 9. Loss Configuration
         print(f"\n9. Loss Configuration")
-        print(f"   Recon Weight: {args.recon_weight}")
         print(f"   Forecast Weight: {args.forecast_weight}")
-        print(f"   Cognitive Weight: {args.cognitive_weight}")
         print(f"   Consistency Weight: {args.consistency_weight}")
         print(f"   Spectral Weight: {args.spectral_weight}")
         print(f"   Rollout Weight: {args.rollout_weight}")
@@ -2411,8 +2396,6 @@ def train(args):
             ablation_status.append("NO Control Fusion")
         if not args.use_temporal_transformer:
             ablation_status.append("NO Temporal Transformer")
-        if not args.use_cognitive_readout:
-            ablation_status.append("NO Cognitive Readout")
         if not args.use_spatial_encoder:
             ablation_status.append("NO Spatial Encoder (using Linear)")
         
@@ -2530,9 +2513,7 @@ def train(args):
     
     # Loss weights (base weights, KL will be annealed)
     base_loss_weights = {
-        'recon': args.recon_weight,
         'forecast': args.forecast_weight,
-        'cognitive': args.cognitive_weight,
         'consistency': args.consistency_weight,
         'spectral': args.spectral_weight,
         'rollout': args.rollout_weight,
@@ -3461,7 +3442,6 @@ def train(args):
                 'use_task_context': args.use_task_context,
                 'use_control_fusion': args.use_control_fusion,
                 'use_temporal_transformer': args.use_temporal_transformer,
-                'use_cognitive_readout': args.use_cognitive_readout,
                 'use_spatial_encoder': args.use_spatial_encoder,
                 'diffusion_mode': args.diffusion_mode,
                 'use_sde': args.use_sde
@@ -3654,7 +3634,7 @@ def main():
                         help='Path to checkpoint to resume training from')
     
     # MAE pre-training
-    parser.add_argument('--use_mae', action='store_true', default=True,
+    parser.add_argument('--use_mae', action='store_true', default=False,
                         help='Use MAE (Masked Autoencoder) pre-training')
     parser.add_argument('--mask_ratio', type=float, default=0.5,
                         help='Fixed ratio of input to mask (0.0-1.0)')
@@ -3677,9 +3657,7 @@ def main():
                         help='Use curriculum learning (start easy, end hard)')
     
     # Loss weights
-    parser.add_argument('--recon_weight', type=float, default=1.0)
     parser.add_argument('--forecast_weight', type=float, default=1.0)
-    parser.add_argument('--cognitive_weight', type=float, default=0.5)
     parser.add_argument('--consistency_weight', type=float, default=0.5)
     parser.add_argument('--spectral_weight', type=float, default=0.1)
     parser.add_argument('--rollout_weight', type=float, default=0.5)
@@ -3787,8 +3765,6 @@ def main():
                         help='Disable control fusion module (for ablation studies)')
     parser.add_argument('--no_temporal_transformer', action='store_false', dest='use_temporal_transformer', default=True,
                         help='Disable temporal transformer (for ablation studies)')
-    parser.add_argument('--no_cognitive_readout', action='store_false', dest='use_cognitive_readout', default=True,
-                        help='Disable cognitive readout head (for ablation studies)')
     parser.add_argument('--no_spatial_encoder', action='store_false', dest='use_spatial_encoder', default=True,
                         help='Disable graph spatial encoder, use simple linear projection (for ablation studies)')
     
@@ -3798,13 +3774,21 @@ def main():
     parser.add_argument('--downstream_tasks', type=str, default='sex,disease',
                         help='Comma-separated tasks: sex,disease (age is DISABLED, will be ignored if included)')
     parser.add_argument('--downstream_datasets', type=str, default='all',
-                        help='Comma-separated disease datasets: ABIDE,ADNI,PPMI,NEUROCON,TAOWU or "all" (default: all)')
+                        help='Comma-separated disease datasets: ABIDE,ADNI,PPMI or "all" (default: all)')
     parser.add_argument('--downstream_eval_freq', type=int, default=10,
                         help='Evaluate downstream tasks every N epochs')
     parser.add_argument('--demographics_csv', type=str, default=None,
-                        help='Path to demographics CSV for downstream evaluation')
+                        help='Path to demographics CSV (used for age conditioning and downstream evaluation)')
     parser.add_argument('--save_best_downstream', action='store_true', default=False,
                         help='Save best model based on downstream task performance (age MSE + sex accuracy)')
+
+    # Age conditioning — embed normalized subject age as the first dimension of context vectors v
+    parser.add_argument('--use_age_context', action='store_true', default=False,
+                        help='Embed normalized subject age as the first dimension of context vectors. Requires --demographics_csv.')
+    parser.add_argument('--age_min', type=float, default=8.0,
+                        help='Minimum age (years) used to normalize age to [0, 1] for context conditioning')
+    parser.add_argument('--age_max', type=float, default=100.0,
+                        help='Maximum age (years) used to normalize age to [0, 1] for context conditioning')
     
     # Module probe heads for monitoring module-level losses
     parser.add_argument('--enable_module_probes', action='store_true', default=True,
